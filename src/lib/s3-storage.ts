@@ -14,6 +14,7 @@
 
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { logger } from './logger';
 
 // S3 Configuration from environment variables
 const S3_ENDPOINT = process.env.S3_ENDPOINT || process.env.SUPABASE_S3_ENDPOINT || '';
@@ -61,7 +62,7 @@ export async function uploadToS3(
   contentType: string = 'application/octet-stream'
 ): Promise<string | null> {
   if (!s3Client) {
-    console.error('S3 client not configured. Please set S3_ENDPOINT, S3_ACCESS_KEY_ID, and S3_SECRET_ACCESS_KEY environment variables.');
+    logger.error('S3 client not configured. Please set S3_ENDPOINT, S3_ACCESS_KEY_ID, and S3_SECRET_ACCESS_KEY environment variables.');
     return null;
   }
 
@@ -81,10 +82,10 @@ export async function uploadToS3(
     const baseUrl = S3_ENDPOINT.replace('/storage/v1/s3', '');
     const publicUrl = `${baseUrl}/storage/v1/object/public/${S3_BUCKET}/${filePath}`;
     
-    console.log(`File uploaded to S3: ${filePath}`);
+    logger.log(`File uploaded to S3: ${filePath}`);
     return publicUrl;
   } catch (error) {
-    console.error('Error uploading to S3:', error);
+    logger.error('Error uploading to S3:', error);
     return null;
   }
 }
@@ -101,7 +102,7 @@ export async function getS3SignedUrl(
   expiresIn: number = 3600
 ): Promise<string | null> {
   if (!s3Client) {
-    console.error('S3 client not configured');
+    logger.error('S3 client not configured');
     return null;
   }
 
@@ -114,7 +115,7 @@ export async function getS3SignedUrl(
     const signedUrl = await getSignedUrl(s3Client, command, { expiresIn });
     return signedUrl;
   } catch (error) {
-    console.error('Error generating signed URL:', error);
+    logger.error('Error generating signed URL:', error);
     return null;
   }
 }
@@ -127,7 +128,7 @@ export async function getS3SignedUrl(
  */
 export function getS3PublicUrl(filePath: string): string | null {
   if (!S3_ENDPOINT) {
-    console.error('S3 endpoint not configured');
+    logger.error('S3 endpoint not configured');
     return null;
   }
 
@@ -136,7 +137,7 @@ export function getS3PublicUrl(filePath: string): string | null {
     const baseUrl = S3_ENDPOINT.replace('/storage/v1/s3', '');
     return `${baseUrl}/storage/v1/object/public/${S3_BUCKET}/${filePath}`;
   } catch (error) {
-    console.error('Error constructing public URL:', error);
+    logger.error('Error constructing public URL:', error);
     return null;
   }
 }
@@ -149,7 +150,7 @@ export function getS3PublicUrl(filePath: string): string | null {
  */
 export async function deleteFromS3(filePath: string): Promise<boolean> {
   if (!s3Client) {
-    console.error('S3 client not configured');
+    logger.error('S3 client not configured');
     return false;
   }
 
@@ -162,7 +163,7 @@ export async function deleteFromS3(filePath: string): Promise<boolean> {
     await s3Client.send(command);
     return true;
   } catch (error) {
-    console.error('Error deleting from S3:', error);
+    logger.error('Error deleting from S3:', error);
     return false;
   }
 }
@@ -175,7 +176,7 @@ export async function deleteFromS3(filePath: string): Promise<boolean> {
  */
 export async function fileExistsInS3(filePath: string): Promise<boolean> {
   if (!s3Client) {
-    console.error('S3 client not configured');
+    logger.error('S3 client not configured');
     return false;
   }
 
@@ -191,7 +192,7 @@ export async function fileExistsInS3(filePath: string): Promise<boolean> {
     if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404) {
       return false;
     }
-    console.error('Error checking file existence:', error);
+    logger.error('Error checking file existence:', error);
     return false;
   }
 }

@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../lib/prisma';
+import { logger } from '../lib/logger';
 
 // Security headers middleware
 export const securityHeaders = (req: Request, res: Response, next: NextFunction) => {
@@ -125,7 +126,7 @@ export const validateSessionCodeSecurity = async (req: Request, res: Response, n
     (req as any).session = session;
     next();
   } catch (error: any) {
-    console.error('Session validation error:', error);
+    logger.error('Session validation error:', error);
     return res.status(500).json({
       success: false,
       error: 'Failed to validate session'
@@ -166,12 +167,12 @@ export const enforceTimer = async (req: Request, res: Response, next: NextFuncti
 
     // Check if session has expired
     if (session.expiresAt && new Date(session.expiresAt) < new Date()) {
-      // Auto-end expired sessions
+      // Auto-end expired sessions (mark as 'ended', not 'submitted')
       if (session.status === 'active') {
         await prisma.session.update({
           where: { id: sessionId },
           data: {
-            status: 'submitted',
+            status: 'ended',
             submittedAt: new Date()
           }
         });
@@ -188,12 +189,12 @@ export const enforceTimer = async (req: Request, res: Response, next: NextFuncti
     if (session.startedAt && session.timeLimit) {
       const elapsed = (Date.now() - new Date(session.startedAt).getTime()) / 1000;
       if (elapsed > session.timeLimit) {
-        // Auto-end sessions that exceeded time limit
+        // Auto-end sessions that exceeded time limit (mark as 'ended', not 'submitted')
         if (session.status === 'active') {
           await prisma.session.update({
             where: { id: sessionId },
             data: {
-              status: 'submitted',
+              status: 'ended',
               submittedAt: new Date()
             }
           });
@@ -209,7 +210,7 @@ export const enforceTimer = async (req: Request, res: Response, next: NextFuncti
 
     next();
   } catch (error: any) {
-    console.error('Timer enforcement error:', error);
+    logger.error('Timer enforcement error:', error);
     return res.status(500).json({
       success: false,
       error: 'Failed to enforce timer'

@@ -14,6 +14,7 @@ import { EventEmitter } from 'events';
 import * as path from 'path';
 import * as fs from 'fs';
 import Docker from 'dockerode';
+import { logger } from '../lib/logger';
 
 interface MCPTool {
   name: string;
@@ -143,11 +144,11 @@ export class MCPClient extends EventEmitter {
               const logLines = data.toString().split('\n').filter(line => line.trim());
               logLines.forEach(line => {
                 if (line.includes('ERROR:')) {
-                  console.error(`[MCP Server ${this.containerName}] ${line}`);
+                  logger.error(`[MCP Server ${this.containerName}] ${line}`);
                 } else if (line.includes('WARNING:') || line.includes('WARN:')) {
-                  console.warn(`[MCP Server ${this.containerName}] ${line}`);
+                  logger.warn(`[MCP Server ${this.containerName}] ${line}`);
                 } else {
-                  console.log(`[MCP Server ${this.containerName}] ${line}`);
+                  logger.log(`[MCP Server ${this.containerName}] ${line}`);
                 }
               });
             }
@@ -159,7 +160,7 @@ export class MCPClient extends EventEmitter {
         });
 
         stream.on('error', (error: Error) => {
-          console.error(`[MCP Client] Docker exec error: ${error.message}`);
+          logger.error(`[MCP Client] Docker exec error: ${error.message}`);
           reject(error);
         });
 
@@ -207,11 +208,12 @@ export class MCPClient extends EventEmitter {
         const logLines = data.toString().split('\n').filter(line => line.trim());
         logLines.forEach(line => {
           if (line.includes('ERROR:')) {
-            console.error(`[MCP Server] ${line}`);
+            logger.error(`[MCP Server] ${line}`);
           } else if (line.includes('WARNING:') || line.includes('WARN:')) {
-            console.warn(`[MCP Server] ${line}`);
+            logger.warn(`[MCP Server] ${line}`);
           } else {
-            console.log(`[MCP Server] ${line}`);
+            // INFO, DEBUG, and other logs
+            logger.log(`[MCP Server] ${line}`);
           }
         });
       });
@@ -405,7 +407,7 @@ export class MCPClient extends EventEmitter {
         const message = JSON.parse(line);
         this.handleMessage(message);
       } catch (e) {
-        console.error(`[MCP Client] Failed to parse message: ${line}`);
+        logger.error(`[MCP Client] Failed to parse message: ${line}`);
       }
     }
   }
@@ -537,7 +539,7 @@ export function getMCPClientManager(): MCPClientManager {
     
     if (useDocker) {
       // Docker mode: containers are already running
-      console.log('[MCP Client] Using Docker containers for MCP servers');
+      logger.log('[MCP Client] Using Docker containers for MCP servers');
       clientManager = new MCPClientManager('', true, 'promora-mcp-server');
     } else {
       // Local mode: spawn Python processes
@@ -545,10 +547,13 @@ export function getMCPClientManager(): MCPClientManager {
       const projectRoot = path.resolve(backendDir, '..');
       const mcpServersPath = path.join(projectRoot, 'MCP-Servers');
       
-      console.log(`[MCP Client] Using local spawn for MCP servers at: ${mcpServersPath}`);
+      // Debug logging
+      logger.log(`[MCP Client] Backend dir: ${backendDir}`);
+      logger.log(`[MCP Client] Using local spawn for MCP servers at: ${mcpServersPath}`);
       
       const serverAPath = path.join(mcpServersPath, 'server-a-job-analysis/src/server.py');
       const serverAExists = fs.existsSync(serverAPath);
+      logger.log(`[MCP Client] Server A exists: ${serverAExists} at ${serverAPath}`);
       
       if (!serverAExists) {
         throw new Error(`MCP server not found at: ${serverAPath}`);

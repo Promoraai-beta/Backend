@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import jwt from 'jsonwebtoken';
+import { logger } from '../lib/logger';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
@@ -87,6 +88,11 @@ router.get('/candidate', authenticateToken, async (req: Request, res: Response) 
     // See: https://supabase.com/docs/guides/storage/buckets/fundamentals
     const avatarUrl = user.candidateProfile.avatar || null;
 
+    // Debug logging to help diagnose image loading issues
+    logger.log('📸 Profile avatar URL from database:', avatarUrl);
+    logger.log('📸 User ID:', userId);
+    logger.log('📸 Profile exists:', !!user.candidateProfile);
+
     res.json({
       success: true,
       data: {
@@ -100,7 +106,7 @@ router.get('/candidate', authenticateToken, async (req: Request, res: Response) 
       }
     });
   } catch (error: any) {
-    console.error('Get candidate profile error:', error);
+    logger.error('Get candidate profile error:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to get candidate profile'
@@ -141,7 +147,11 @@ router.put('/candidate', authenticateToken, async (req: Request, res: Response) 
     if (title !== undefined) updateData.title = title;
     if (location !== undefined) updateData.location = location;
     if (bio !== undefined) updateData.bio = bio;
-    if (avatar !== undefined) updateData.avatar = avatar;
+    if (avatar !== undefined) {
+      updateData.avatar = avatar;
+      logger.log('💾 Saving avatar URL to database:', avatar);
+      logger.log('💾 User ID:', userId);
+    }
     if (skills !== undefined) updateData.skills = skills;
     if (interests !== undefined) updateData.interests = interests;
     if (targetRole !== undefined) updateData.targetRole = targetRole;
@@ -159,13 +169,15 @@ router.put('/candidate', authenticateToken, async (req: Request, res: Response) 
         ...updateData
       }
     });
+    
+    logger.log('💾 Profile updated successfully. Avatar URL in database:', profile.avatar);
 
     res.json({
       success: true,
       data: profile
     });
   } catch (error: any) {
-    console.error('Update candidate profile error:', error);
+    logger.error('Update candidate profile error:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to update candidate profile'
@@ -209,7 +221,7 @@ router.post('/candidate/onboarding', authenticateToken, async (req: Request, res
       data: profile
     });
   } catch (error: any) {
-    console.error('Candidate onboarding error:', error);
+    logger.error('Candidate onboarding error:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to complete onboarding'
@@ -273,7 +285,7 @@ router.get('/recruiter', authenticateToken, async (req: Request, res: Response) 
       }
     });
   } catch (error: any) {
-    console.error('Get recruiter profile error:', error);
+    logger.error('Get recruiter profile error:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to get recruiter profile'
@@ -389,7 +401,7 @@ router.put('/recruiter', authenticateToken, async (req: Request, res: Response) 
       }
     });
   } catch (error: any) {
-    console.error('Update recruiter profile error:', error);
+    logger.error('Update recruiter profile error:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to update recruiter profile'
@@ -469,7 +481,7 @@ router.post('/recruiter/onboarding', authenticateToken, async (req: Request, res
       }
     });
   } catch (error: any) {
-    console.error('Recruiter onboarding error:', error);
+    logger.error('Recruiter onboarding error:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to complete onboarding'

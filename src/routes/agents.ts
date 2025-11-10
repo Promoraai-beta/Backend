@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { watchSession, executeAnalysis, flagSanityChecks } from '../mcp/servers/serverC';
 import { authenticate } from '../middleware/rbac';
 import { prisma } from '../lib/prisma';
+import { logger } from '../lib/logger';
 
 const router = Router();
 
@@ -38,7 +39,7 @@ async function verifySessionAccess(sessionId: string, userId: string, userRole: 
 
     return userRole === 'recruiter';
   } catch (error) {
-    console.error('Error verifying session access:', error);
+    logger.error('Error verifying session access:', error);
     return false;
   }
 }
@@ -132,7 +133,7 @@ router.get('/full-report/:sessionId', async (req: Request, res: Response) => {
 
       if (existingInsights) {
         // Return cached insights from database
-        console.log(`📊 Returning cached agent insights for session ${sessionId} (computed at: ${existingInsights.computedAt})`);
+        logger.log(`📊 Returning cached agent insights for session ${sessionId} (computed at: ${existingInsights.computedAt})`);
         return res.json({
           success: true,
           report: {
@@ -148,20 +149,20 @@ router.get('/full-report/:sessionId', async (req: Request, res: Response) => {
     }
 
     // No cached insights or force refresh - compute new insights
-    console.log(`🔄 Computing new agent insights for session ${sessionId}...`);
+    logger.log(`🔄 Computing new agent insights for session ${sessionId}...`);
     
     // Run all MCP Server C agents in parallel for faster response
     const [watcher, extractor, sanity] = await Promise.all([
       watchSession(sessionId, true, true).catch(err => {
-        console.error('Watcher agent error:', err);
+        logger.error('Watcher agent error:', err);
         return { success: false, error: err.message, violations: [], riskScore: 0 };
       }),
       executeAnalysis(sessionId).catch(err => {
-        console.error('Extractor agent error:', err);
+        logger.error('Extractor agent error:', err);
         return { success: false, error: err.message, behaviorScore: 0 };
       }),
       flagSanityChecks(sessionId).catch(err => {
-        console.error('Sanity agent error:', err);
+        logger.error('Sanity agent error:', err);
         return { success: false, error: err.message, redFlags: [], riskScore: 0 };
       })
     ]);
@@ -185,7 +186,7 @@ router.get('/full-report/:sessionId', async (req: Request, res: Response) => {
             updatedAt: new Date()
           }
         });
-        console.log(`✅ Updated agent insights for session ${sessionId} (version ${existing.version + 1})`);
+        logger.log(`✅ Updated agent insights for session ${sessionId} (version ${existing.version + 1})`);
       } else {
         // Create new insights
         await prisma.agentInsight.create({
@@ -198,11 +199,11 @@ router.get('/full-report/:sessionId', async (req: Request, res: Response) => {
             version: 1
           }
         });
-        console.log(`✅ Stored new agent insights for session ${sessionId}`);
+        logger.log(`✅ Stored new agent insights for session ${sessionId}`);
       }
     } catch (dbError: any) {
       // Log error but don't fail the request - insights are computed and returned
-      console.error('⚠️ Failed to store agent insights in database:', dbError.message);
+      logger.error('⚠️ Failed to store agent insights in database:', dbError.message);
       // Continue to return insights even if database storage fails
     }
 
@@ -217,7 +218,7 @@ router.get('/full-report/:sessionId', async (req: Request, res: Response) => {
       computedAt: new Date().toISOString()
     });
   } catch (error: any) {
-    console.error('Error in full-report endpoint:', error);
+    logger.error('Error in full-report endpoint:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

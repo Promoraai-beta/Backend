@@ -16,6 +16,7 @@ import { authenticate, requireRole, checkAssessmentOwnership } from '../middlewa
 import { validateAssessmentGeneration, handleValidationErrors } from '../middleware/validation';
 import { apiLimiter } from '../middleware/rate-limiter';
 import { findOrCreateTemplate, updateTemplateBuildStatus } from '../lib/template-utils';
+import { logger } from '../lib/logger';
 
 const router = Router();
 
@@ -153,7 +154,7 @@ router.post('/generate', apiLimiter, authenticate, requireRole(['recruiter', 'ca
           language = 'java';
         }
         
-        console.log(`🔨 Building WebContainer structure with MCP Server B (language: ${language})...`);
+        logger.log(`🔨 Building WebContainer structure with MCP Server B (language: ${language})...`);
         
         // Extract role and level from assessment metadata
         const jobRole = assessments.role || 'Frontend Developer';
@@ -173,9 +174,9 @@ router.post('/generate', apiLimiter, authenticate, requireRole(['recruiter', 'ca
           complexity
         );
         
-        console.log(`✅ WebContainer structure built: ${Object.keys(enhancedTemplateSpec.fileStructure).length} files`);
+        logger.log(`✅ WebContainer structure built: ${Object.keys(enhancedTemplateSpec.fileStructure).length} files`);
       } catch (error: any) {
-        console.error('❌ MCP Server B failed:', error);
+        logger.error('❌ MCP Server B failed:', error);
         templateBuildError = error.message;
         // Continue with original templateSpec if Server B fails
       }
@@ -240,9 +241,9 @@ router.post('/generate', apiLimiter, authenticate, requireRole(['recruiter', 'ca
           suggestedAssessments: assessments.suggestedAssessments
         });
         templateId = template.id;
-        console.log(`📦 Using template ${templateId} (hash: ${template.templateHash.substring(0, 8)}...)`);
+        logger.log(`📦 Using template ${templateId} (hash: ${template.templateHash.substring(0, 8)}...)`);
       } catch (error: any) {
-        console.error('⚠️ Failed to find/create template, falling back to inline storage:', error.message);
+        logger.error('⚠️ Failed to find/create template, falling back to inline storage:', error.message);
         // Fall back to storing template inline (backward compatibility)
       }
     }
@@ -292,7 +293,7 @@ router.post('/generate', apiLimiter, authenticate, requireRole(['recruiter', 'ca
         if (needsDocker) {
           // Check if template already has Docker image built
           if (template?.dockerImageBuilt && template?.dockerImage) {
-            console.log(`✅ Reusing existing Docker template: ${template.dockerImage}`);
+            logger.log(`✅ Reusing existing Docker template: ${template.dockerImage}`);
             templateBuildResult = {
               templateId: buildTemplateId,
               status: 'ready',
@@ -303,7 +304,7 @@ router.post('/generate', apiLimiter, authenticate, requireRole(['recruiter', 'ca
             };
           } else {
             // Build Docker image (only if not already built)
-            console.log(`⏳ Building Docker template for assessment ${assessment.id}...`);
+            logger.log(`⏳ Building Docker template for assessment ${assessment.id}...`);
             
             // Update template status to 'building'
             if (template) {
@@ -313,7 +314,7 @@ router.post('/generate', apiLimiter, authenticate, requireRole(['recruiter', 'ca
             const buildResult = await templateBuilder.buildTemplate(buildTemplateId, finalTemplateSpec as any);
             
             if (buildResult.status === 'ready') {
-              console.log(`✅ Docker template built successfully: ${buildResult.dockerImage}`);
+              logger.log(`✅ Docker template built successfully: ${buildResult.dockerImage}`);
               
               // Update template with build result
               if (template) {
@@ -378,10 +379,10 @@ router.post('/generate', apiLimiter, authenticate, requireRole(['recruiter', 'ca
             reused: template?.webcontainerReady || false,
             message: 'WebContainer template ready - no Docker build needed'
           };
-          console.log(`✅ WebContainer template ready (${Object.keys((finalTemplateSpec as any).fileStructure || {}).length} files)${template?.webcontainerReady ? ' - reused' : ''}`);
+          logger.log(`✅ WebContainer template ready (${Object.keys((finalTemplateSpec as any).fileStructure || {}).length} files)${template?.webcontainerReady ? ' - reused' : ''}`);
         }
       } catch (error: any) {
-        console.error('Failed to build template:', error);
+        logger.error('Failed to build template:', error);
         
         // Update template status if it exists
         if (template) {
@@ -402,7 +403,7 @@ router.post('/generate', apiLimiter, authenticate, requireRole(['recruiter', 'ca
       }
     } else {
       // No template spec - this shouldn't happen, but handle gracefully
-      console.warn(`⚠️ No template spec available for assessment ${assessment.id}`);
+      logger.warn(`⚠️ No template spec available for assessment ${assessment.id}`);
       templateBuildResult = {
         status: 'ready',
         type: 'none',
@@ -412,7 +413,7 @@ router.post('/generate', apiLimiter, authenticate, requireRole(['recruiter', 'ca
     
     // Handle MCP Server B errors
     if (templateBuildError) {
-      console.warn(`⚠️ MCP Server B failed, using original templateSpec: ${templateBuildError}`);
+      logger.warn(`⚠️ MCP Server B failed, using original templateSpec: ${templateBuildError}`);
     }
 
     // Get template data (from templateRef or inline template)
@@ -450,7 +451,7 @@ router.post('/generate', apiLimiter, authenticate, requireRole(['recruiter', 'ca
       }
     });
   } catch (error: any) {
-    console.error('Error generating assessment:', error);
+    logger.error('Error generating assessment:', error);
     
     // Provide more detailed error information
     let errorMessage = 'Failed to generate assessment';
@@ -503,7 +504,7 @@ router.get('/', authenticate, requireRole(['recruiter', 'candidate', 'admin']), 
       // If recruiter profile doesn't exist, return empty array instead of 404
       // This allows new recruiters to see an empty dashboard and create assessments
       if (!recruiterProfile) {
-        console.warn(`Recruiter profile not found for user ${userId}, returning empty assessments list`);
+        logger.warn(`Recruiter profile not found for user ${userId}, returning empty assessments list`);
         return res.json({
           success: true,
           data: [] // Return empty array instead of 404
@@ -588,7 +589,7 @@ router.get('/', authenticate, requireRole(['recruiter', 'candidate', 'admin']), 
         data: assessments
       });
     } catch (queryError: any) {
-      console.error('Database query error in assessments route:', {
+      logger.error('Database query error in assessments route:', {
         error: queryError.message,
         code: queryError.code,
         meta: queryError.meta,
@@ -599,7 +600,7 @@ router.get('/', authenticate, requireRole(['recruiter', 'candidate', 'admin']), 
       throw queryError; // Re-throw to be caught by outer catch
     }
   } catch (error: any) {
-    console.error('Error fetching assessments:', {
+    logger.error('Error fetching assessments:', {
       message: error.message,
       stack: error.stack,
       code: error.code,

@@ -6,6 +6,7 @@ import fs from 'fs';
 import { createClient } from '@supabase/supabase-js';
 import { updateHLSPlaylist, getHLSPlaylistUrl } from '../lib/hls';
 import { buildVideoChunkPath, sanitizeName } from '../lib/storage-utils';
+import { logger } from '../lib/logger';
 
 const router = Router();
 
@@ -147,7 +148,7 @@ const validateVideoUploadAfterMulter = (req: Request, res: Response, next: NextF
   // Chunk 0 contains WebM header/initialization (should be larger, e.g., > 1KB)
   // Subsequent chunks are fragments (can be any size > 0, even very small if video is static)
   if (file.size === 0) {
-    console.error(`Chunk ${chunkIndex} (${streamType}): Empty file (0 bytes)`);
+    logger.error(`Chunk ${chunkIndex} (${streamType}): Empty file (0 bytes)`);
     return res.status(400).json({
       success: false,
       error: 'Validation failed',
@@ -164,7 +165,7 @@ const validateVideoUploadAfterMulter = (req: Request, res: Response, next: NextF
   // Some MediaRecorder implementations might create smaller headers
   const MIN_CHUNK_0_SIZE = 100; // Very permissive - just ensure it's not empty
   if (chunkIndex === 0 && file.size < MIN_CHUNK_0_SIZE) {
-    console.warn(`Chunk 0 (${streamType}): Very small (${file.size} bytes), expected larger for WebM header`);
+    logger.warn(`Chunk 0 (${streamType}): Very small (${file.size} bytes), expected larger for WebM header`);
     // Don't reject - still allow upload
   }
 
@@ -175,15 +176,15 @@ const validateVideoUploadAfterMulter = (req: Request, res: Response, next: NextF
     const webmMagic = Buffer.from([0x1A, 0x45, 0xDF, 0xA3]);
     
     if (magicBytes.equals(webmMagic)) {
-      console.log(`✅ Chunk 0 (${streamType}): Valid WebM header detected (${file.size} bytes)`);
+      logger.log(`✅ Chunk 0 (${streamType}): Valid WebM header detected (${file.size} bytes)`);
     } else {
-      console.warn(`Chunk 0 (${streamType}): Missing WebM magic bytes (1A 45 DF A3), got: ${magicBytes.toString('hex')}`);
-      console.warn(`File size: ${file.size} bytes, First 32 bytes: ${file.buffer.slice(0, Math.min(32, file.buffer.length)).toString('hex')}`);
+      logger.warn(`Chunk 0 (${streamType}): Missing WebM magic bytes (1A 45 DF A3), got: ${magicBytes.toString('hex')}`);
+      logger.warn(`File size: ${file.size} bytes, First 32 bytes: ${file.buffer.slice(0, Math.min(32, file.buffer.length)).toString('hex')}`);
       
       // Check if it's just empty or corrupted data (all zeros)
       const hasNonZeroData = file.buffer.some((byte: number) => byte !== 0);
       if (!hasNonZeroData) {
-        console.error(`Chunk 0 (${streamType}): File contains only zeros - corrupted or empty`);
+        logger.error(`Chunk 0 (${streamType}): File contains only zeros - corrupted or empty`);
         return res.status(400).json({
           success: false,
           error: 'Validation failed',
@@ -198,12 +199,12 @@ const validateVideoUploadAfterMulter = (req: Request, res: Response, next: NextF
       
       // Chunk 0 without magic bytes is unusual but might still work
       // Don't reject - allow upload and let playback handle it
-      console.warn(`Chunk 0 (${streamType}): Missing WebM header, but contains data. Proceeding with upload.`);
+      logger.warn(`Chunk 0 (${streamType}): Missing WebM header, but contains data. Proceeding with upload.`);
     }
   } else if (chunkIndex > 0) {
     // Fragments (chunkIndex > 0) are just data - no header validation needed
     // They can be any size > 0
-    console.log(`✅ Fragment ${chunkIndex} (${streamType}): ${file.size} bytes`);
+    logger.log(`✅ Fragment ${chunkIndex} (${streamType}): ${file.size} bytes`);
   }
 
   next();
@@ -219,7 +220,7 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
     // If validation middleware didn't catch it, this is a critical error
     const streamType = req.body.streamType;
     if (!streamType || !['webcam', 'screenshare'].includes(streamType)) {
-      console.error(`❌ CRITICAL: Invalid or missing streamType: ${streamType}`);
+      logger.error(`❌ CRITICAL: Invalid or missing streamType: ${streamType}`);
       return res.status(400).json({
         success: false,
         error: `Invalid or missing streamType. Received: "${streamType}". Must be "webcam" or "screenshare"`
@@ -229,7 +230,7 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
     const file = req.file;
     
     // ✅ Log streamType for debugging
-    console.log(`\n📤 Upload request: { sessionId: '${sessionId}', streamType: '${streamType}', chunkIndex: ${chunkIndex} }`);
+    logger.log(`\n📤 Upload request: { sessionId: '${sessionId}', streamType: '${streamType}', chunkIndex: ${chunkIndex} }`);
 
     // Validation is now handled by middleware, but keep this as a safety check
     if (!sessionId || chunkIndex === undefined || !file) {
@@ -244,7 +245,7 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
     // IMPORTANT: Fragments (chunkIndex > 0) can be very small - don't reject them!
     // Only chunk 0 needs to be larger (contains WebM header), fragments are just data
     if (file.size === 0) {
-      console.error(`Rejecting chunk ${chunkIndex} (${streamType}): Empty file (0 bytes)`);
+      logger.error(`Rejecting chunk ${chunkIndex} (${streamType}): Empty file (0 bytes)`);
       return res.status(400).json({
         success: false,
         error: `Video chunk is empty (0 bytes)`
@@ -253,7 +254,7 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
     
     // Chunk 0 should be larger, but don't reject if smaller (some MediaRecorder implementations vary)
     if (chunkIndex === 0 && file.size < 100) {
-      console.warn(`Chunk 0 (${streamType}): Very small (${file.size} bytes), but allowing upload`);
+      logger.warn(`Chunk 0 (${streamType}): Very small (${file.size} bytes), but allowing upload`);
       // Don't reject - allow upload
     }
     
@@ -261,7 +262,7 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
     // Don't reject small fragments - they're valid!
 
     // Log chunk info for debugging
-    console.log(`📦 Uploading chunk ${chunkIndex} (${streamType}): ${file.size} bytes, MIME: ${file.mimetype || 'video/webm'}`);
+    logger.log(`📦 Uploading chunk ${chunkIndex} (${streamType}): ${file.size} bytes, MIME: ${file.mimetype || 'video/webm'}`);
 
     // Fetch session details to get candidate name, assessment, and company info
     const session = await prisma.session.findUnique({
@@ -302,15 +303,15 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
     
     // ✅ Verify streamType matches what we're using for path
     if (streamTypeForPath !== streamType) {
-      console.error(`❌ CRITICAL: streamType mismatch! Path uses "${streamTypeForPath}" but validated streamType is "${streamType}"`);
+      logger.error(`❌ CRITICAL: streamType mismatch! Path uses "${streamTypeForPath}" but validated streamType is "${streamType}"`);
       return res.status(500).json({
         success: false,
         error: 'Internal error: streamType mismatch'
       });
     }
     
-    console.log(`📁 Building path for ${streamType} chunk ${chunkIndex}:`);
-    console.log(`   companies/${companyName}/jobs/${jobName}/${candidateName}/${streamTypeForPath}/`);
+    logger.log(`📁 Building path for ${streamType} chunk ${chunkIndex}:`);
+    logger.log(`   companies/${companyName}/jobs/${jobName}/${candidateName}/${streamTypeForPath}/`);
 
     // ✅ CRITICAL: Check if a chunk with the same chunkIndex and streamType already exists
     // If it does, we need to delete the old file to avoid duplicates
@@ -324,8 +325,8 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
 
     let oldFilePath: string | null = null;
     if (existingChunk) {
-      console.log(`⚠️ Found existing chunk ${chunkIndex} (${streamTypeForPath}) for session ${sessionId}`);
-      console.log(`   Old URL: ${existingChunk.url}`);
+      logger.log(`⚠️ Found existing chunk ${chunkIndex} (${streamTypeForPath}) for session ${sessionId}`);
+      logger.log(`   Old URL: ${existingChunk.url}`);
       
       // Extract the file path from the URL
       // URL format: https://{supabase-url}/storage/v1/object/public/{bucket}/{path}
@@ -336,7 +337,7 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
         if (pathParts.length > 1) {
           // Remove the bucket name (first part) and join the rest
           oldFilePath = pathParts.slice(1).join('/');
-          console.log(`   Old file path: ${oldFilePath}`);
+          logger.log(`   Old file path: ${oldFilePath}`);
         }
       }
     }
@@ -371,25 +372,25 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
       // Note: We'll delete the database record after successful upload
       if (oldFilePath && existingChunk) {
         try {
-          console.log(`🗑️ Deleting old chunk file: ${oldFilePath}`);
+          logger.log(`🗑️ Deleting old chunk file: ${oldFilePath}`);
           const { error: deleteError } = await supabase.storage
             .from(bucket)
             .remove([oldFilePath]);
           
           if (deleteError) {
-            console.warn(`⚠️ Failed to delete old file ${oldFilePath}:`, deleteError);
+            logger.warn(`⚠️ Failed to delete old file ${oldFilePath}:`, deleteError);
             // Continue with upload even if delete fails - we'll handle cleanup later
           } else {
-            console.log(`✅ Deleted old chunk file: ${oldFilePath}`);
+            logger.log(`✅ Deleted old chunk file: ${oldFilePath}`);
           }
         } catch (deleteError) {
-          console.warn(`⚠️ Error deleting old file:`, deleteError);
+          logger.warn(`⚠️ Error deleting old file:`, deleteError);
           // Continue with upload
         }
       }
 
-      console.log(`Uploading to Supabase: ${filePath} (${file.size} bytes)`);
-      console.log(`📁 New folder structure: companies/{company}/jobs/{job}/{candidate}/{streamType}/`);
+      logger.log(`Uploading to Supabase: ${filePath} (${file.size} bytes)`);
+      logger.log(`📁 New folder structure: companies/{company}/jobs/{job}/{candidate}/{streamType}/`);
       
       // Retry logic for Supabase upload
       let uploadSuccess = false;
@@ -399,7 +400,7 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
           if (attempt > 1) {
-            console.log(`Retry attempt ${attempt}/${maxRetries} for ${filePath}`);
+            logger.log(`Retry attempt ${attempt}/${maxRetries} for ${filePath}`);
             await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
           }
           
@@ -412,7 +413,7 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
             });
 
           if (error) {
-            console.error(`Upload attempt ${attempt} error:`, error);
+            logger.error(`Upload attempt ${attempt} error:`, error);
             throw error;
           }
 
@@ -424,7 +425,7 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
           url = urlData.publicUrl;
           sizeBytes = BigInt(file.size);
           uploadSuccess = true;
-          console.log(`✅ Supabase upload successful: ${filePath}`);
+          logger.log(`✅ Supabase upload successful: ${filePath}`);
           break;
         } catch (retryError: any) {
           lastError = retryError;
@@ -432,13 +433,13 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
       }
 
       if (!uploadSuccess) {
-        console.error('All retry attempts failed for:', filePath);
-        console.error('Last error:', lastError);
+        logger.error('All retry attempts failed for:', filePath);
+        logger.error('Last error:', lastError);
         throw lastError || new Error('Upload failed after retries');
       }
 
     } catch (supabaseError) {
-      console.error('Supabase upload failed:', supabaseError);
+      logger.error('Supabase upload failed:', supabaseError);
       return res.status(500).json({
         success: false,
         error: 'Failed to upload video to storage'
@@ -461,15 +462,15 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
       // ✅ CRITICAL: Verify streamType matches URL path before saving
       const urlContainsStreamType = url.includes(`/${streamType}/`);
       if (!urlContainsStreamType) {
-        console.error(`❌ CRITICAL: URL path mismatch! streamType="${streamType}" but URL="${url.substring(0, 100)}..."`);
-        console.error(`Expected URL to contain "/${streamType}/" but it doesn't!`);
-        console.error(`This is a critical error - the chunk will be saved with incorrect streamType!`);
+        logger.error(`❌ CRITICAL: URL path mismatch! streamType="${streamType}" but URL="${url.substring(0, 100)}..."`);
+        logger.error(`Expected URL to contain "/${streamType}/" but it doesn't!`);
+        logger.error(`This is a critical error - the chunk will be saved with incorrect streamType!`);
         // Don't fail upload, but log the error - this should never happen if code is correct
       } else {
-        console.log(`✅ URL path verification passed: URL contains "/${streamType}/"`);
+        logger.log(`✅ URL path verification passed: URL contains "/${streamType}/"`);
       }
       
-      console.log(`📤 Uploading to: ${url.substring(Math.max(0, url.length - 80))}`);
+      logger.log(`📤 Uploading to: ${url.substring(Math.max(0, url.length - 80))}`);
       
       videoChunk = await prisma.videoChunk.create({
         data: {
@@ -487,21 +488,21 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
           await prisma.videoChunk.delete({
             where: { id: existingChunk.id }
           });
-          console.log(`✅ Deleted old chunk record from database (id: ${existingChunk.id})`);
+          logger.log(`✅ Deleted old chunk record from database (id: ${existingChunk.id})`);
         } catch (dbDeleteError) {
-          console.warn(`⚠️ Failed to delete old chunk from database:`, dbDeleteError);
+          logger.warn(`⚠️ Failed to delete old chunk from database:`, dbDeleteError);
           // Not critical - old record will just be orphaned
         }
       }
       
       // ✅ Verify what was saved
-      console.log(`✅ Saved ${streamType} chunk ${chunkIndex} to database`);
-      console.log(`   URL: ${url.substring(Math.max(0, url.length - 80))}`);
-      console.log(`   Size: ${file.size} bytes`);
+      logger.log(`✅ Saved ${streamType} chunk ${chunkIndex} to database`);
+      logger.log(`   URL: ${url.substring(Math.max(0, url.length - 80))}`);
+      logger.log(`   Size: ${file.size} bytes`);
     } catch (dbError: any) {
       // Log error but don't fail the upload - file is already in Supabase
       // This ensures we don't lose video data even if DB write fails
-      console.error(`Failed to save chunk metadata to database (chunk ${chunkIndex}):`, dbError);
+      logger.error(`Failed to save chunk metadata to database (chunk ${chunkIndex}):`, dbError);
       // Continue - file is in Supabase, DB metadata can be synced later if needed
     }
 
@@ -509,7 +510,7 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
     // Only updates if DB write succeeded (chunk exists in DB)
     if (videoChunk) {
       updateHLSPlaylist(sessionId).catch(err => {
-        console.error('Failed to update HLS playlist:', err);
+        logger.error('Failed to update HLS playlist:', err);
       });
     }
 
@@ -531,7 +532,7 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
     });
 
   } catch (error: any) {
-    console.error('Video upload error:', error);
+    logger.error('Video upload error:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to upload video chunk'
@@ -550,7 +551,7 @@ router.get('/:sessionId', async (req: Request, res: Response) => {
     const { sessionId } = req.params;
     const { streamType } = req.query; // Optional filter by stream type
 
-    console.log(`\n📥 GET /api/video/${sessionId}${streamType ? `?streamType=${streamType}` : ''}`);
+    logger.log(`\n📥 GET /api/video/${sessionId}${streamType ? `?streamType=${streamType}` : ''}`);
 
     // ✅ CRITICAL: Fetch webcam and screenshare separately for better validation
     const [webcamChunks, screenshareChunks] = await Promise.all([
@@ -570,7 +571,7 @@ router.get('/:sessionId', async (req: Request, res: Response) => {
       })
     ]);
 
-    console.log(`📊 Found ${webcamChunks.length} webcam chunks, ${screenshareChunks.length} screenshare chunks`);
+    logger.log(`📊 Found ${webcamChunks.length} webcam chunks, ${screenshareChunks.length} screenshare chunks`);
 
     // ✅ CRITICAL: Verify and fix URLs to match streamType
     const webcamMismatches: any[] = [];
@@ -588,8 +589,8 @@ router.get('/:sessionId', async (req: Request, res: Response) => {
         let correctedUrl = chunk.url;
         if (chunk.url.includes('/screenshare/')) {
           correctedUrl = chunk.url.replace('/screenshare/', '/webcam/');
-          console.warn(`⚠️ Fixing webcam chunk ${chunk.chunkIndex} URL: replacing /screenshare/ with /webcam/`);
-          console.warn(`   ⚠️ WARNING: Corrected URL may not exist if file has different timestamp or location`);
+          logger.warn(`⚠️ Fixing webcam chunk ${chunk.chunkIndex} URL: replacing /screenshare/ with /webcam/`);
+          logger.warn(`   ⚠️ WARNING: Corrected URL may not exist if file has different timestamp or location`);
         }
         return { ...chunk, url: correctedUrl };
       }
@@ -615,11 +616,11 @@ router.get('/:sessionId', async (req: Request, res: Response) => {
         let correctedUrl = chunk.url;
         if (chunk.url.includes('/webcam/')) {
           correctedUrl = chunk.url.replace('/webcam/', '/screenshare/');
-          console.warn(`⚠️ Fixing screenshare chunk ${chunk.chunkIndex} URL: replacing /webcam/ with /screenshare/`);
-          console.warn(`   Original: ${chunk.url.substring(Math.max(0, chunk.url.length - 80))}`);
-          console.warn(`   Corrected: ${correctedUrl.substring(Math.max(0, correctedUrl.length - 80))}`);
-          console.warn(`   ⚠️ WARNING: Corrected URL may not exist if file has different timestamp or location`);
-          console.warn(`   ⚠️ Frontend will skip missing files and continue with available chunks`);
+          logger.warn(`⚠️ Fixing screenshare chunk ${chunk.chunkIndex} URL: replacing /webcam/ with /screenshare/`);
+          logger.warn(`   Original: ${chunk.url.substring(Math.max(0, chunk.url.length - 80))}`);
+          logger.warn(`   Corrected: ${correctedUrl.substring(Math.max(0, correctedUrl.length - 80))}`);
+          logger.warn(`   ⚠️ WARNING: Corrected URL may not exist if file has different timestamp or location`);
+          logger.warn(`   ⚠️ Frontend will skip missing files and continue with available chunks`);
         }
         return { ...chunk, url: correctedUrl };
       }
@@ -628,35 +629,35 @@ router.get('/:sessionId', async (req: Request, res: Response) => {
 
     // Log mismatches
     if (webcamMismatches.length > 0) {
-      console.error(`❌ Found ${webcamMismatches.length} webcam chunks with WRONG URL paths:`);
+      logger.error(`❌ Found ${webcamMismatches.length} webcam chunks with WRONG URL paths:`);
       webcamMismatches.forEach(m => {
-        console.error(`  Chunk ${m.chunkIndex}: DB streamType="${m.streamType}" but URL="${m.url.substring(0, 100)}..."`);
+        logger.error(`  Chunk ${m.chunkIndex}: DB streamType="${m.streamType}" but URL="${m.url.substring(0, 100)}..."`);
       });
     }
 
     if (screenshareMismatches.length > 0) {
-      console.error(`❌ Found ${screenshareMismatches.length} screenshare chunks with WRONG URL paths:`);
+      logger.error(`❌ Found ${screenshareMismatches.length} screenshare chunks with WRONG URL paths:`);
       screenshareMismatches.forEach(m => {
-        console.error(`  Chunk ${m.chunkIndex}: DB streamType="${m.streamType}" but URL="${m.url.substring(0, 100)}..."`);
+        logger.error(`  Chunk ${m.chunkIndex}: DB streamType="${m.streamType}" but URL="${m.url.substring(0, 100)}..."`);
       });
     }
 
     // Log first few chunks of each type for debugging
     if (correctedWebcamChunks.length > 0) {
-      console.log(`\n✅ WEBCAM CHUNKS (first 3):`);
+      logger.log(`\n✅ WEBCAM CHUNKS (first 3):`);
       correctedWebcamChunks.slice(0, 3).forEach(chunk => {
         const urlSnippet = chunk.url.substring(Math.max(0, chunk.url.length - 60));
         const urlMatch = chunk.url.includes('/webcam/') ? '✓' : '❌';
-        console.log(`  Chunk ${chunk.chunkIndex}: ${urlMatch} ${urlSnippet}`);
+        logger.log(`  Chunk ${chunk.chunkIndex}: ${urlMatch} ${urlSnippet}`);
       });
     }
 
     if (correctedScreenshareChunks.length > 0) {
-      console.log(`\n✅ SCREENSHARE CHUNKS (first 3):`);
+      logger.log(`\n✅ SCREENSHARE CHUNKS (first 3):`);
       correctedScreenshareChunks.slice(0, 3).forEach(chunk => {
         const urlSnippet = chunk.url.substring(Math.max(0, chunk.url.length - 60));
         const urlMatch = chunk.url.includes('/screenshare/') ? '✓' : '❌';
-        console.log(`  Chunk ${chunk.chunkIndex}: ${urlMatch} ${urlSnippet}`);
+        logger.log(`  Chunk ${chunk.chunkIndex}: ${urlMatch} ${urlSnippet}`);
       });
     }
 
@@ -693,7 +694,7 @@ router.get('/:sessionId', async (req: Request, res: Response) => {
     });
 
   } catch (error: any) {
-    console.error('Error fetching video chunks:', error);
+    logger.error('Error fetching video chunks:', error);
     res.status(500).json({
       success: false,
       error: error.message

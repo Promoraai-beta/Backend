@@ -2,6 +2,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { createClient } from '@supabase/supabase-js';
 import { prisma } from '../lib/prisma';
 import { buildVideoChunkPath } from '../lib/storage-utils';
+import { logger } from '../lib/logger';
 
 interface VideoChunkMessage {
   type: 'video-chunk';
@@ -34,7 +35,7 @@ class VideoStreamServer {
     });
 
     this.wss.on('connection', (ws: WebSocket, req: any) => {
-      console.log('New WebSocket connection');
+      logger.log('New WebSocket connection');
 
       ws.on('message', async (data: Buffer) => {
         try {
@@ -46,7 +47,7 @@ class VideoStreamServer {
             await this.handleVideoChunk(message);
           }
         } catch (error: any) {
-          console.error('WebSocket message error:', error.message);
+          logger.error('WebSocket message error:', error.message);
           ws.send(JSON.stringify({ 
             type: 'error', 
             message: error.message 
@@ -55,20 +56,20 @@ class VideoStreamServer {
       });
 
       ws.on('close', () => {
-        console.log('WebSocket disconnected');
+        logger.log('WebSocket disconnected');
         this.handleDisconnect(ws);
       });
 
       ws.on('error', (error) => {
-        console.error('WebSocket error:', error);
+        logger.error('WebSocket error:', error);
       });
     });
 
-    console.log('Video streaming WebSocket server initialized');
+    logger.log('Video streaming WebSocket server initialized');
   }
 
   private async handleRegister(ws: WebSocket, sessionId: string, clientType: 'candidate' | 'recruiter') {
-    console.log(`Client registered: ${clientType} for session ${sessionId}`);
+    logger.log(`Client registered: ${clientType} for session ${sessionId}`);
     
     const clientInfo: ClientInfo = {
       sessionId,
@@ -98,7 +99,7 @@ class VideoStreamServer {
     // This allows MediaSource to initialize even if live streaming hasn't started
     if (clientType === 'recruiter' && supabase) {
       this.sendInitialChunks(ws, sessionId).catch(error => {
-        console.error(`Failed to send initial chunks to recruiter:`, error);
+        logger.error(`Failed to send initial chunks to recruiter:`, error);
         // Don't block - recruiter can still receive live chunks
       });
     }
@@ -124,7 +125,7 @@ class VideoStreamServer {
       });
 
       if (chunks.length === 0) {
-        console.log(`No chunk 0 found for session ${sessionId} - will wait for live stream`);
+        logger.log(`No chunk 0 found for session ${sessionId} - will wait for live stream`);
         return;
       }
 
@@ -147,7 +148,7 @@ class VideoStreamServer {
           // Find index of 'video' in path
           const videoIndex = pathParts.indexOf('video');
           if (videoIndex === -1) {
-            console.error(`Invalid chunk URL format: ${chunk.url}`);
+            logger.error(`Invalid chunk URL format: ${chunk.url}`);
             continue;
           }
           
@@ -156,21 +157,21 @@ class VideoStreamServer {
           
           const bucket = process.env.SUPABASE_STORAGE_BUCKET || 'video';
           
-          console.log(`Downloading chunk 0 for ${streamType} from Supabase: ${filePath}`);
+          logger.log(`Downloading chunk 0 for ${streamType} from Supabase: ${filePath}`);
           
           const { data, error } = await supabase!.storage
             .from(bucket)
             .download(filePath);
 
           if (error) {
-            console.error(`Failed to download chunk 0 for ${streamType} from Supabase:`, error);
-            console.error(`File path: ${filePath}, URL: ${chunk.url}`);
+            logger.error(`Failed to download chunk 0 for ${streamType} from Supabase:`, error);
+            logger.error(`File path: ${filePath}, URL: ${chunk.url}`);
             // Continue - chunk 0 might arrive via live stream later
             continue;
           }
 
           if (!data) {
-            console.error(`No data returned for chunk 0 ${streamType}`);
+            logger.error(`No data returned for chunk 0 ${streamType}`);
             continue;
           }
 
@@ -179,12 +180,12 @@ class VideoStreamServer {
           const buffer = Buffer.from(arrayBuffer);
           
           if (buffer.length === 0) {
-            console.error(`Chunk 0 for ${streamType} is empty`);
+            logger.error(`Chunk 0 for ${streamType} is empty`);
             continue;
           }
           
           const base64Data = buffer.toString('base64');
-          console.log(`✅ Downloaded chunk 0 for ${streamType}: ${buffer.length} bytes`);
+          logger.log(`✅ Downloaded chunk 0 for ${streamType}: ${buffer.length} bytes`);
 
           // Send chunk 0 to recruiter
           if (ws.readyState === WebSocket.OPEN) {
@@ -194,27 +195,27 @@ class VideoStreamServer {
               streamType: streamType,
               data: base64Data
             }));
-            console.log(`✅ Sent chunk 0 for ${streamType} to recruiter`);
+            logger.log(`✅ Sent chunk 0 for ${streamType} to recruiter`);
           }
         } catch (error: any) {
-          console.error(`Error sending chunk 0 for stream:`, error);
+          logger.error(`Error sending chunk 0 for stream:`, error);
           // Continue with other streams
         }
       }
     } catch (error: any) {
-      console.error(`Error fetching initial chunks:`, error);
+      logger.error(`Error fetching initial chunks:`, error);
     }
   }
 
   private async handleVideoChunk(message: VideoChunkMessage) {
     const sessionClients = this.clients.get(message.sessionId);
     if (!sessionClients) {
-      console.log(`No clients for session ${message.sessionId}`);
+      logger.log(`No clients for session ${message.sessionId}`);
     }
 
     // 1. Store chunk to Supabase (async, don't block forwarding)
     this.storeChunkToSupabase(message).catch(error => {
-      console.error(`Failed to store chunk ${message.chunkIndex} to Supabase:`, error);
+      logger.error(`Failed to store chunk ${message.chunkIndex} to Supabase:`, error);
       // Don't throw - continue forwarding even if storage fails
     });
 
@@ -236,7 +237,7 @@ class VideoStreamServer {
       }
     }
 
-    console.log(`Broadcasted ${message.streamType} chunk ${message.chunkIndex} to ${recruiters.length} recruiters`);
+    logger.log(`Broadcasted ${message.streamType} chunk ${message.chunkIndex} to ${recruiters.length} recruiters`);
   }
 
   /**
@@ -245,7 +246,7 @@ class VideoStreamServer {
    */
   private async storeChunkToSupabase(message: VideoChunkMessage) {
     if (!supabase) {
-      console.warn('Supabase not configured, skipping chunk storage');
+      logger.warn('Supabase not configured, skipping chunk storage');
       return;
     }
 
@@ -263,13 +264,13 @@ class VideoStreamServer {
       });
 
       if (!session) {
-        console.warn(`Session ${message.sessionId} not found, skipping chunk storage`);
+        logger.warn(`Session ${message.sessionId} not found, skipping chunk storage`);
         return;
       }
 
       // SECURITY: Only store chunks for recruiter assessments
       if (session.assessment?.assessmentType === 'candidate') {
-        console.log(`Skipping chunk storage for candidate assessment ${message.sessionId}`);
+        logger.log(`Skipping chunk storage for candidate assessment ${message.sessionId}`);
         return;
       }
 
@@ -297,7 +298,7 @@ class VideoStreamServer {
 
       // Validate chunk size (skip empty chunks)
       if (buffer.length === 0) {
-        console.warn(`Skipping empty chunk ${message.chunkIndex} for ${message.streamType}`);
+        logger.warn(`Skipping empty chunk ${message.chunkIndex} for ${message.streamType}`);
         return;
       }
 
@@ -313,13 +314,13 @@ class VideoStreamServer {
 
       if (existingChunk && existingChunk.url) {
         // Chunk already uploaded via HTTP - use existing URL and skip storage
-        console.log(`Chunk ${message.chunkIndex} already exists in database (uploaded via HTTP), skipping WebSocket storage`);
+        logger.log(`Chunk ${message.chunkIndex} already exists in database (uploaded via HTTP), skipping WebSocket storage`);
         url = existingChunk.url;
       } else {
         // Upload to Supabase Storage (chunk not yet uploaded)
         const bucket = process.env.SUPABASE_STORAGE_BUCKET || 'video';
         
-        console.log(`📦 Storing ${message.streamType} chunk ${message.chunkIndex} to Supabase: ${filePath} (${buffer.length} bytes)`);
+        logger.log(`📦 Storing ${message.streamType} chunk ${message.chunkIndex} to Supabase: ${filePath} (${buffer.length} bytes)`);
 
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from(bucket)
@@ -331,7 +332,7 @@ class VideoStreamServer {
         if (uploadError) {
           // If file already exists, try to get its URL
           if (uploadError.message?.includes('already exists') || uploadError.message?.includes('duplicate')) {
-            console.log(`Chunk ${message.chunkIndex} file already exists in storage, getting URL`);
+            logger.log(`Chunk ${message.chunkIndex} file already exists in storage, getting URL`);
             const { data: urlData } = supabase.storage
               .from(bucket)
               .getPublicUrl(filePath);
@@ -340,7 +341,7 @@ class VideoStreamServer {
             throw uploadError;
           }
         } else {
-          console.log(`✅ Stored ${message.streamType} chunk ${message.chunkIndex} to Supabase: ${filePath}`);
+          logger.log(`✅ Stored ${message.streamType} chunk ${message.chunkIndex} to Supabase: ${filePath}`);
           
           // Get public URL
           const { data: urlData } = supabase.storage
@@ -361,7 +362,7 @@ class VideoStreamServer {
               sizeBytes: BigInt(buffer.length)
             }
           });
-          console.log(`✅ Updated chunk ${message.chunkIndex} metadata in database`);
+          logger.log(`✅ Updated chunk ${message.chunkIndex} metadata in database`);
         } else {
           // Create new chunk record
           await prisma.videoChunk.create({
@@ -372,15 +373,15 @@ class VideoStreamServer {
               sizeBytes: BigInt(buffer.length)
             }
           });
-          console.log(`✅ Saved chunk ${message.chunkIndex} metadata to database`);
+          logger.log(`✅ Saved chunk ${message.chunkIndex} metadata to database`);
         }
       } catch (dbError: any) {
         // Log but don't fail - file is in Supabase
-        console.error(`Failed to save chunk ${message.chunkIndex} metadata to database:`, dbError);
+        logger.error(`Failed to save chunk ${message.chunkIndex} metadata to database:`, dbError);
       }
 
     } catch (error: any) {
-      console.error(`Error storing chunk ${message.chunkIndex} to Supabase:`, error);
+      logger.error(`Error storing chunk ${message.chunkIndex} to Supabase:`, error);
       // Don't throw - continue processing even if storage fails
     }
   }
@@ -391,7 +392,7 @@ class VideoStreamServer {
       for (const client of clients) {
         if (client.ws === ws) {
           clients.delete(client);
-          console.log(`Removed ${client.clientType} from session ${sessionId}`);
+          logger.log(`Removed ${client.clientType} from session ${sessionId}`);
           
           // Clean up empty sessions
           if (clients.size === 0) {

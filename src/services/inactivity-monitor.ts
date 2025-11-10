@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { Prisma } from '@prisma/client';
+import { logger } from '../lib/logger';
 
 // Configuration
 const INACTIVITY_TIMEOUT_MS = parseInt(process.env.INACTIVITY_TIMEOUT_MS || '900000', 10); // 15 minutes default
@@ -63,9 +64,9 @@ export async function checkInactiveSessions() {
       return { checked: 0, ended: 0 };
     }
 
-    console.log(`[Inactivity Monitor] Found ${inactiveSessions.length} inactive sessions`);
+    logger.log(`[Inactivity Monitor] Found ${inactiveSessions.length} inactive sessions`);
 
-    // End all inactive sessions
+    // End all inactive sessions (mark as 'ended', not 'submitted')
     const endedSessions = await prisma.session.updateMany({
       where: {
         id: {
@@ -79,7 +80,7 @@ export async function checkInactiveSessions() {
       }
     });
 
-    console.log(`[Inactivity Monitor] Ended ${endedSessions.count} inactive sessions`);
+    logger.log(`[Inactivity Monitor] Ended ${endedSessions.count} inactive sessions`);
 
     // Log details for each ended session
     inactiveSessions.forEach(session => {
@@ -87,7 +88,7 @@ export async function checkInactiveSessions() {
       const inactiveDuration = lastActivity 
         ? Math.round((now.getTime() - lastActivity.getTime()) / 1000 / 60) 
         : 0;
-      console.log(`[Inactivity Monitor] Ended session ${session.sessionCode} (inactive for ${inactiveDuration} minutes)`);
+      logger.log(`[Inactivity Monitor] Ended session ${session.sessionCode} (inactive for ${inactiveDuration} minutes)`);
     });
 
     return { checked: inactiveSessions.length, ended: endedSessions.count };
@@ -115,12 +116,12 @@ export async function checkInactiveSessions() {
 
     if (shouldLog) {
       if (isConnectionError) {
-        console.error(`[Inactivity Monitor] Database connection error (${errorCode}): Database unreachable. Skipping inactivity checks.`);
+        logger.error(`[Inactivity Monitor] Database connection error (${errorCode}): Database unreachable. Skipping inactivity checks.`);
         if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-          console.error(`[Inactivity Monitor] Too many consecutive errors (${consecutiveErrors}). Pausing inactivity checks until database is available.`);
+          logger.error(`[Inactivity Monitor] Too many consecutive errors (${consecutiveErrors}). Pausing inactivity checks until database is available.`);
         }
       } else {
-        console.error(`[Inactivity Monitor] Error checking inactive sessions (${errorCode}):`, errorMessage);
+        logger.error(`[Inactivity Monitor] Error checking inactive sessions (${errorCode}):`, errorMessage);
       }
       lastErrorTime = now;
       lastErrorMessage = errorMessage;
@@ -140,7 +141,7 @@ export async function checkInactiveSessions() {
  * Runs periodically to check and end inactive sessions
  */
 export function startInactivityMonitor() {
-  console.log(`[Inactivity Monitor] Starting inactivity monitor (timeout: ${INACTIVITY_TIMEOUT_MS / 1000 / 60} minutes, check interval: ${CHECK_INTERVAL_MS / 1000} seconds)`);
+  logger.log(`[Inactivity Monitor] Starting inactivity monitor (timeout: ${INACTIVITY_TIMEOUT_MS / 1000 / 60} minutes, check interval: ${CHECK_INTERVAL_MS / 1000} seconds)`);
 
   // Run immediately on startup (but don't log errors - they're handled in checkInactiveSessions)
   checkInactiveSessions().catch(() => {
@@ -159,7 +160,7 @@ export function startInactivityMonitor() {
   // Return cleanup function
   return () => {
     clearInterval(intervalId);
-    console.log('[Inactivity Monitor] Stopped');
+    logger.log('[Inactivity Monitor] Stopped');
   };
 }
 

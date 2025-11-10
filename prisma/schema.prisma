@@ -113,6 +113,24 @@ model Invitation {
   @@map("invitations")
 }
 
+// Password Reset model for forgot password flow
+model PasswordReset {
+  id        String    @id @default(uuid())
+  email     String
+  code      String    // 6-digit verification code
+  token     String    @unique // Token for password reset link
+  used      Boolean   @default(false) // Whether the reset has been used
+  usedAt    DateTime? @map("used_at")
+  expiresAt DateTime  @map("expires_at") // Code expires after 15 minutes
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([email])
+  @@index([code])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("password_resets")
+}
+
 // Reusable Template model - stores template specs that can be reused across assessments
 model Template {
   id                   String   @id @default(uuid())

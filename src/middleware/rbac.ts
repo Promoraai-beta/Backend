@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import * as jwt from 'jsonwebtoken';
 import { prisma } from '../lib/prisma';
+import { logger } from '../lib/logger';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
@@ -112,27 +113,27 @@ export const checkSessionOwnership = async (req: Request, res: Response, next: N
       // Check 1: Session was created by this recruiter (via recruiterEmail)
       if (session.recruiterEmail && recruiterProfile.user?.email && 
           session.recruiterEmail.toLowerCase() === recruiterProfile.user.email.toLowerCase()) {
-        console.log(`[Session Access] Recruiter ${req.userId} granted access via recruiterEmail match`);
+        logger.log(`[Session Access] Recruiter ${req.userId} granted access via recruiterEmail match`);
         return next();
       }
 
       // Check 2: Assessment was created by this recruiter
       if (session.assessment?.createdBy === req.userId) {
-        console.log(`[Session Access] Recruiter ${req.userId} granted access via assessment creator`);
+        logger.log(`[Session Access] Recruiter ${req.userId} granted access via assessment creator`);
         return next();
       }
 
       // Check 3: Recruiter's company owns the assessment
       if (session.assessment?.companyId && recruiterProfile.companyId && 
           session.assessment.companyId === recruiterProfile.companyId) {
-        console.log(`[Session Access] Recruiter ${req.userId} granted access via company ownership`);
+        logger.log(`[Session Access] Recruiter ${req.userId} granted access via company ownership`);
         return next();
       }
 
       // If assessment type is recruiter and no explicit ownership, still allow if recruiter is authenticated
       // This handles cases where sessions are created for recruiter assessments but company linkage isn't perfect
       if (session.assessment?.assessmentType === 'recruiter' && recruiterProfile) {
-        console.log(`[Session Access] Recruiter ${req.userId} granted access to recruiter assessment`);
+        logger.log(`[Session Access] Recruiter ${req.userId} granted access to recruiter assessment`);
         return next();
       }
     }
@@ -143,13 +144,13 @@ export const checkSessionOwnership = async (req: Request, res: Response, next: N
     }
 
     // Deny access
-    console.log(`[Session Access] Access denied for user ${req.userId} (role: ${req.userRole}) to session ${sessionId}`);
+    logger.log(`[Session Access] Access denied for user ${req.userId} (role: ${req.userRole}) to session ${sessionId}`);
     return res.status(403).json({
       success: false,
       error: 'Access denied. You do not have permission to access this session.'
     });
   } catch (error: any) {
-    console.error('Session ownership check error:', error);
+    logger.error('Session ownership check error:', error);
     return res.status(500).json({
       success: false,
       error: 'Failed to verify session ownership'
@@ -205,7 +206,7 @@ export const checkAssessmentOwnership = async (req: Request, res: Response, next
       error: 'Access denied. You do not have permission to access this assessment.'
     });
   } catch (error: any) {
-    console.error('Assessment ownership check error:', error);
+    logger.error('Assessment ownership check error:', error);
     return res.status(500).json({
       success: false,
       error: 'Failed to verify assessment ownership'
