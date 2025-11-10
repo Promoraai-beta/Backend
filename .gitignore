@@ -1,0 +1,58 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Testing
+coverage/
+
+# Production
+dist/
+build/
+
+# Environment variables
+.env
+.env.local
+.env.backup
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*.local
+*.env
+*.env.local
+*.env.backup
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# OS
+.DS_Store
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Prisma
+# Keep migrations but ignore generated client (in node_modules)
+# prisma/migrations/ is tracked
+
+# Uploads
+uploads/
+*.webm
+*.mp4
+
+# Temporary files
+tmp/
+temp/
+.cache/
+
