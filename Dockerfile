@@ -21,8 +21,10 @@ COPY prisma ./prisma
 
 # Generate Prisma Client
 # OpenSSL is installed above, and binaryTargets in schema.prisma will ensure correct binaries are generated
-# Force regeneration to ensure all models are included
-RUN npx prisma generate --schema=./prisma/schema.prisma
+# Clear any cached Prisma client and force regeneration to ensure all models are included
+# Use schema.prisma modification time to bust cache when schema changes
+RUN rm -rf node_modules/.prisma node_modules/@prisma/client && \
+    npx prisma generate --schema=./prisma/schema.prisma
 
 # Copy source code
 COPY src ./src

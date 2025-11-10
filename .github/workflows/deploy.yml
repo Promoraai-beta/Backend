@@ -80,7 +80,11 @@ jobs:
           echo ""
           echo "Deploying containers..."
           if [ "$SERVICE" = "backend" ]; then
-            docker compose up -d --build backend
+            # Force rebuild without cache for Prisma client regeneration
+            # Remove old container and image to force fresh build
+            docker compose rm -f backend 2>/dev/null || true
+            docker compose build --no-cache backend
+            docker compose up -d backend
           elif [ "$SERVICE" = "frontend" ]; then
             docker compose up -d --build frontend
           elif [ "$SERVICE" = "mcp" ]; then
@@ -100,10 +104,13 @@ jobs:
               -o StrictHostKeyChecking=no \
               /tmp/ci-deploy.sh ubuntu@${{ secrets.EC2_HOST }}:/opt/promora/scripts/ci-deploy.sh
           
-          # Copy Backend src directory to EC2
+          # Copy Backend src and prisma directories to EC2
           scp -i ~/.ssh/deploy_key \
               -o StrictHostKeyChecking=no \
               -r src/ ubuntu@${{ secrets.EC2_HOST }}:/opt/promora/Backend/
+          scp -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              -r prisma/ ubuntu@${{ secrets.EC2_HOST }}:/opt/promora/Backend/
           
           # Run deployment
           ssh -i ~/.ssh/deploy_key \

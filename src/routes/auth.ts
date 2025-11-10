@@ -3,7 +3,6 @@ import { logger } from '../lib/logger';
 import { prisma } from '../lib/prisma';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import * as crypto from 'crypto';
 import { authLimiter } from '../middleware/rate-limiter';
 import { validateEmail, validatePassword, handleValidationErrors } from '../middleware/validation';
 import { sendEmail, generatePasswordResetEmail } from '../lib/email';
@@ -287,7 +286,7 @@ router.get('/me', async (req: Request, res: Response) => {
   }
 });
 
-// Request password reset - send verification code via email
+// Request password reset code
 router.post('/forgot-password', authLimiter, validateEmail, handleValidationErrors, async (req: Request, res: Response) => {
   try {
     const { email } = req.body;
@@ -299,81 +298,81 @@ router.post('/forgot-password', authLimiter, validateEmail, handleValidationErro
       });
     }
 
-    // Check if user exists (don't reveal if email exists for security)
+    // Check if user exists
     const user = await prisma.user.findUnique({
       where: { email }
     });
 
-    logger.log('📧 Forgot password request for:', email);
-    logger.log('👤 User exists:', !!user);
-
-    // Always return success to prevent email enumeration
-    // But only send email if user exists
-    if (user) {
-      // Generate 6-digit verification code
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
-      
-      // Generate secure token for password reset
-      const token = crypto.randomBytes(32).toString('hex');
-      
-      // Set expiration to 15 minutes from now
-      const expiresAt = new Date();
-      expiresAt.setMinutes(expiresAt.getMinutes() + 15);
-
-      logger.log('🔑 Generated reset code:', code);
-      logger.log('⏰ Code expires at:', expiresAt.toISOString());
-
-      // Invalidate any existing reset requests for this email
-      const invalidated = await prisma.passwordReset.updateMany({
-        where: {
-          email,
-          used: false,
-          expiresAt: { gt: new Date() }
-        },
-        data: {
-          used: true
-        }
+    // Return success but indicate if code was sent (to prevent email enumeration while allowing UI flow)
+    if (!user) {
+      return res.json({
+        success: true,
+        codeSent: false,
+        message: 'If an account with that email exists, a reset code has been sent.'
       });
-      logger.log('🗑️ Invalidated existing requests:', invalidated.count);
-
-      // Create new password reset record
-      const resetRecord = await prisma.passwordReset.create({
-        data: {
-          email,
-          code,
-          token,
-          expiresAt
-        }
-      });
-      logger.log('✅ Created password reset record:', resetRecord.id);
-
-      // Send email with verification code
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-      const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
-      
-      const emailOptions = generatePasswordResetEmail(user.email, user.name || 'User', code, resetUrl);
-      const emailResult = await sendEmail(emailOptions);
-      
-      if (!emailResult.success) {
-        logger.error('❌ Failed to send password reset email:', emailResult.error);
-        logger.error('📧 Email details:', {
-          to: user.email,
-          code: code,
-          error: emailResult.error
-        });
-        // Log the code for development/debugging (remove in production)
-        if (process.env.NODE_ENV === 'development') {
-          logger.log('🔑 Password reset code (DEV ONLY):', code);
-        }
-      } else {
-        logger.log('✅ Password reset email sent successfully to:', user.email);
-      }
     }
 
-    // Always return success (security best practice)
+    // Check daily limit (3 requests per day per email)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const todayRequests = await prisma.passwordResetCode.count({
+      where: {
+        email: email.toLowerCase(),
+        createdAt: {
+          gte: today,
+          lt: tomorrow
+        }
+      }
+    });
+
+    if (todayRequests >= 3) {
+      return res.status(429).json({
+        success: false,
+        error: 'You have reached the maximum number of password reset requests for today. Please try again tomorrow.'
+      });
+    }
+
+    // Generate 6-digit code
+    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Set expiration to 15 minutes from now
+    const expiresAt = new Date();
+    expiresAt.setMinutes(expiresAt.getMinutes() + 15);
+
+    // Create password reset code record
+    await prisma.passwordResetCode.create({
+      data: {
+        userId: user.id,
+        email: email.toLowerCase(),
+        code: resetCode,
+        expiresAt
+      }
+    });
+
+    // Send email with reset code
+    const frontendUrl = process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:3000';
+    const resetUrl = `${frontendUrl}/forgot-password`;
+    const emailOptions = generatePasswordResetEmail(
+      user.email,
+      user.name,
+      resetCode,
+      resetUrl
+    );
+
+    const emailResult = await sendEmail(emailOptions);
+
+    if (!emailResult.success) {
+      logger.error('Failed to send password reset email:', emailResult.error);
+      // Still return success to user, but log the error
+    }
+
     res.json({
       success: true,
-      message: 'If an account with that email exists, a password reset code has been sent.'
+      codeSent: true,
+      message: 'If an account with that email exists, a reset code has been sent.'
     });
   } catch (error: any) {
     logger.error('Forgot password error:', error);
@@ -389,146 +388,97 @@ router.post('/verify-reset-code', authLimiter, async (req: Request, res: Respons
   try {
     const { email, code } = req.body;
 
-    logger.log('🔍 Verifying reset code:', { email, codeLength: code?.length });
-
     if (!email || !code) {
-      logger.log('❌ Missing email or code');
       return res.status(400).json({
         success: false,
         error: 'Email and code are required'
       });
     }
 
-    // Find valid reset request
-    const resetRequest = await prisma.passwordReset.findFirst({
+    // Find valid reset code
+    const resetCode = await prisma.passwordResetCode.findFirst({
       where: {
-        email,
-        code,
-        used: false,
-        expiresAt: { gt: new Date() }
+        email: email.toLowerCase(),
+        code: code,
+        usedAt: null,
+        expiresAt: {
+          gt: new Date()
+        }
       },
       orderBy: {
         createdAt: 'desc'
       }
     });
 
-    if (!resetRequest) {
-      // Check if code exists but is expired or used
-      const anyRequest = await prisma.passwordReset.findFirst({
-        where: {
-          email,
-          code
-        },
-        orderBy: {
-          createdAt: 'desc'
-        }
-      });
-
-      if (anyRequest) {
-        if (anyRequest.used) {
-          logger.log('❌ Code already used');
-          return res.status(400).json({
-            success: false,
-            error: 'This verification code has already been used. Please request a new password reset.'
-          });
-        }
-        if (new Date() > anyRequest.expiresAt) {
-          logger.log('❌ Code expired');
-          return res.status(400).json({
-            success: false,
-            error: 'Verification code has expired. Please request a new password reset.'
-          });
-        }
-      } else {
-        logger.log('❌ No reset request found for email:', email);
-      }
-
+    if (!resetCode) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid or expired verification code'
+        error: 'Invalid or expired reset code'
       });
     }
 
-    logger.log('✅ Code verified successfully for:', email);
-
-    // Return token for password reset
     res.json({
       success: true,
-      data: {
-        token: resetRequest.token
-      }
+      message: 'Reset code is valid'
     });
   } catch (error: any) {
     logger.error('Verify reset code error:', error);
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to verify code'
+      error: error.message || 'Failed to verify reset code'
     });
   }
 });
 
-// Reset password with new password
+// Reset password with code
 router.post('/reset-password', authLimiter, validatePassword, handleValidationErrors, async (req: Request, res: Response) => {
   try {
-    const { token, password } = req.body;
+    const { email, code, newPassword } = req.body;
 
-    if (!token || !password) {
+    if (!email || !code || !newPassword) {
       return res.status(400).json({
         success: false,
-        error: 'Token and password are required'
+        error: 'Email, code, and new password are required'
       });
     }
 
-    // Find valid reset request
-    const resetRequest = await prisma.passwordReset.findUnique({
+    // Find valid reset code
+    const resetCode = await prisma.passwordResetCode.findFirst({
       where: {
-        token,
-        used: false
+        email: email.toLowerCase(),
+        code: code,
+        usedAt: null,
+        expiresAt: {
+          gt: new Date()
+        }
+      },
+      include: {
+        user: true
+      },
+      orderBy: {
+        createdAt: 'desc'
       }
     });
 
-    if (!resetRequest) {
+    if (!resetCode) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid or expired reset token'
-      });
-    }
-
-    // Check if token has expired
-    if (new Date() > resetRequest.expiresAt) {
-      return res.status(400).json({
-        success: false,
-        error: 'Reset token has expired. Please request a new password reset.'
-      });
-    }
-
-    // Find user
-    const user = await prisma.user.findUnique({
-      where: { email: resetRequest.email }
-    });
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        error: 'User not found'
+        error: 'Invalid or expired reset code'
       });
     }
 
     // Hash new password
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    // Update password and mark reset as used
+    // Update user password and mark code as used
     await prisma.$transaction([
       prisma.user.update({
-        where: { id: user.id },
+        where: { id: resetCode.userId },
         data: { password: hashedPassword }
       }),
-      prisma.passwordReset.update({
-        where: { id: resetRequest.id },
-        data: {
-          used: true,
-          usedAt: new Date()
-        }
+      prisma.passwordResetCode.update({
+        where: { id: resetCode.id },
+        data: { usedAt: new Date() }
       })
     ]);
 

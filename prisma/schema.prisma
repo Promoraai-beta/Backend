@@ -24,6 +24,7 @@ model User {
   candidateProfile CandidateProfile?
   recruiterProfile RecruiterProfile?
   sessions         Session[] // Sessions where user is candidate
+  passwordResetCodes PasswordResetCode[] // Password reset codes
 
   @@map("users")
 }
@@ -326,4 +327,23 @@ model AgentInsight {
   @@index([sessionId])
   @@index([computedAt])
   @@map("agent_insights")
+}
+
+// Password Reset Code model - stores password reset codes
+model PasswordResetCode {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  email     String    // Email address for the reset request
+  code      String    // 6-digit reset code
+  expiresAt DateTime  @map("expires_at") // Code expiration time (15 minutes)
+  usedAt    DateTime? @map("used_at") // When code was used
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([email])
+  @@index([userId])
+  @@index([code])
+  @@index([createdAt])
+  @@map("password_reset_codes")
 }
