@@ -58,7 +58,7 @@ router.get('/:sessionId', liveMonitoringLimiter, authenticate, checkSessionOwner
         violations: watcher.success ? watcher.violations : [],
         riskScore: watcher.success ? watcher.riskScore : 0,
         latestActivity: detectLatestActivity(interactions),
-        status: session?.status === 'active' ? 'active' : 'completed'
+        status: session?.status || 'unknown'
       },
       
       extractor: {

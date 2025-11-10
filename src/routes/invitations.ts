@@ -5,6 +5,7 @@ import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
 import { authenticate, requireRole } from '../middleware/rbac';
 import { apiLimiter } from '../middleware/rate-limiter';
+import { logger } from '../lib/logger';
 
 const router = Router();
 
@@ -75,7 +76,7 @@ router.post('/', apiLimiter, authenticate, requireRole(['recruiter']), async (re
       }
     });
   } catch (error: any) {
-    console.error('Create invitation error:', error);
+    logger.error('Create invitation error:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to create invitation'
@@ -132,7 +133,7 @@ router.get('/:token', apiLimiter, async (req: Request, res: Response) => {
       }
     });
   } catch (error: any) {
-    console.error('Get invitation error:', error);
+    logger.error('Get invitation error:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to get invitation'
@@ -289,7 +290,7 @@ router.post('/:token/accept', apiLimiter, async (req: Request, res: Response) =>
             }
           });
   } catch (error: any) {
-    console.error('Accept invitation error:', error);
+    logger.error('Accept invitation error:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to accept invitation'

@@ -11,6 +11,7 @@ import { securityHeaders, enforceTimer } from './middleware/security';
 import { apiLimiter, executeLimiter, codeSaveLimiter, videoUploadLimiter, aiInteractionLimiter, liveMonitoringLimiter, authLimiter, sessionCodeLimiter } from './middleware/rate-limiter';
 import { validateCodeExecution, validateSubmission, validateCodeSave } from './middleware/validation';
 import { startInactivityMonitor } from './services/inactivity-monitor';
+import { logger } from './lib/logger';
 
 dotenv.config();
 
@@ -93,6 +94,19 @@ const LANGUAGE_IDS: Record<string, number> = {
 };
 
 // Routes
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    message: 'Promora Backend API',
+    version: '1.0.0',
+    endpoints: {
+      health: '/health',
+      api: '/api',
+      docs: 'API endpoints are available at /api/*'
+    }
+  });
+});
+
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'Backend server is running' });
 });
@@ -138,7 +152,7 @@ app.post('/api/code-save', codeSaveLimiter, validateCodeSave, async (req: Reques
         
         codeSaveDebounce.delete(debounceKey);
       } catch (error) {
-        console.error('Debounced code save error:', error);
+        logger.error('Debounced code save error:', error);
         codeSaveDebounce.delete(debounceKey);
       }
     }, 2000); // 2 second debounce
@@ -577,7 +591,7 @@ app.post('/api/submit', enforceTimer, validateSubmission, async (req: Request, r
       }
     });
   } catch (error: any) {
-    console.error('Submission error:', error);
+    logger.error('Submission error:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message || 'Failed to submit code' 
@@ -619,8 +633,8 @@ videoStreamServer.initialize(server);
 
 // Start server
 server.listen(PORT, () => {
-  console.log(`🚀 Backend server running on http://localhost:${PORT}`);
-  console.log(`📡 WebSocket server initialized on ws://localhost:${PORT}/ws/video`);
+  logger.log(`🚀 Backend server running on http://localhost:${PORT}`);
+  logger.log(`📡 WebSocket server initialized on ws://localhost:${PORT}/ws/video`);
   
   // Start inactivity monitoring service
   startInactivityMonitor();

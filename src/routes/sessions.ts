@@ -10,6 +10,7 @@ import { authenticate, checkSessionOwnership, optionalAuthenticate, requireRole 
 import * as jwt from 'jsonwebtoken';
 import { sendEmail, generateAssessmentEmail } from '../lib/email';
 import multer from 'multer';
+import { logger } from '../lib/logger';
 
 const router = Router();
 
@@ -169,24 +170,25 @@ router.post('/', apiLimiter, optionalAuthenticate, validateSessionCreation, asyn
             sessionCode,
             assessmentUrl,
             jobTitle,
-            timeLimitMinutes
+            timeLimitMinutes,
+            data.expiresAt || undefined
           );
 
           // Send email in background (don't wait for it)
           sendEmail(emailOptions).catch((error) => {
-            console.error('Failed to send invitation email:', error);
+            logger.error('Failed to send invitation email:', error);
             // Don't fail the request if email fails
           });
         }
       } catch (emailError) {
-        console.error('Error sending invitation email:', emailError);
+        logger.error('Error sending invitation email:', emailError);
         // Don't fail the request if email fails
       }
     }
 
     res.json({ success: true, data });
   } catch (error: any) {
-    console.error('Session creation error:', error);
+    logger.error('Session creation error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -304,7 +306,7 @@ router.get('/', async (req: ExpressRequest, res: ExpressResponse) => {
 
     res.json({ success: true, data: filteredData });
   } catch (error: any) {
-    console.error('Error fetching sessions:', error);
+    logger.error('Error fetching sessions:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -483,12 +485,12 @@ router.get('/code/:code', sessionCodeLimiter, validateSessionCodeSecurity, optio
     // If assessment type is 'candidate' but has recruiterEmail/companyId, it's likely a misclassification
     // Treat as recruiter assessment if session was created by recruiter (has recruiterEmail)
     else if (assessmentType === 'candidate' && (hasRecruiterEmail || hasCompanyId)) {
-      console.warn(`[Session Access] Assessment ${data.assessment.id} marked as 'candidate' but has recruiter indicators. Treating as recruiter assessment.`);
+      logger.warn(`[Session Access] Assessment ${data.assessment.id} marked as 'candidate' but has recruiter indicators. Treating as recruiter assessment.`);
       assessmentType = 'recruiter';
     }
     
     // Log for debugging
-    console.log(`[Session Access] Session ${data.id}, Assessment Type: ${assessmentType}, Original Type: ${data.assessment.assessmentType}, HasCompanyId: ${hasCompanyId}, HasRecruiterEmail: ${hasRecruiterEmail}, User: ${userId || 'anonymous'}, Role: ${userRole || 'none'}`);
+    logger.log(`[Session Access] Session ${data.id}, Assessment Type: ${assessmentType}, Original Type: ${data.assessment.assessmentType}, HasCompanyId: ${hasCompanyId}, HasRecruiterEmail: ${hasRecruiterEmail}, User: ${userId || 'anonymous'}, Role: ${userRole || 'none'}`);
 
     // SECURITY: Handle recruiter assessments first (these are accessible via session code)
     // Recruiter assessments can be accessed by anyone with the session code
@@ -528,7 +530,7 @@ router.get('/code/:code', sessionCodeLimiter, validateSessionCodeSecurity, optio
           }
         } catch (error) {
           // If update fails, continue anyway - session code is still valid
-          console.warn('Failed to link session to candidate:', error);
+          logger.warn('Failed to link session to candidate:', error);
         }
       }
       // Always allow access to recruiter assessments via session code
@@ -539,7 +541,7 @@ router.get('/code/:code', sessionCodeLimiter, validateSessionCodeSecurity, optio
     else if (assessmentType === 'candidate') {
       // Only enforce authentication for candidate assessments if they were explicitly created as candidate type
       if (!userId || userRole !== 'candidate' || data.assessment.createdBy !== userId) {
-        console.log(`[Session Access Denied] Candidate assessment access denied for session ${data.id}. User: ${userId}, Role: ${userRole}, CreatedBy: ${data.assessment.createdBy}`);
+        logger.log(`[Session Access Denied] Candidate assessment access denied for session ${data.id}. User: ${userId}, Role: ${userRole}, CreatedBy: ${data.assessment.createdBy}`);
         return res.status(403).json({
           success: false,
           error: 'Access denied. Candidate assessments require authentication and can only be accessed by the creator.'
@@ -556,7 +558,7 @@ router.get('/code/:code', sessionCodeLimiter, validateSessionCodeSecurity, optio
           try {
             template = JSON.parse(template);
           } catch (e) {
-            console.error('Failed to parse assessment template:', e);
+            logger.error('Failed to parse assessment template:', e);
             template = null;
           }
         }
@@ -588,11 +590,11 @@ router.get('/code/:code', sessionCodeLimiter, validateSessionCodeSecurity, optio
           const templateSpec = (template as any).templateSpec;
           if (templateSpec && templateSpec.fileStructure) {
             response.templateFiles = templateSpec.fileStructure;
-            console.log('📁 Including template files in session response');
+            logger.log('📁 Including template files in session response');
           }
         }
         
-        console.log('📋 Session API: Sending assessment template:', {
+        logger.log('📋 Session API: Sending assessment template:', {
           hasTemplate: !!template,
           suggestedAssessmentsCount: suggestedAssessments.length,
           templateType: typeof template,
@@ -665,7 +667,7 @@ router.post('/:id/start', enforceTimer, async (req: ExpressRequest, res: Express
         templateSpec = templateRef.templateSpec as any;
         const refSuggestedAssessments = templateRef.suggestedAssessments;
         suggestedAssessments = Array.isArray(refSuggestedAssessments) ? refSuggestedAssessments : null;
-        console.log(`📦 Using reusable template: ${templateRef.templateHash?.substring(0, 8)}... (usage: ${templateRef.usageCount})`);
+        logger.log(`📦 Using reusable template: ${templateRef.templateHash?.substring(0, 8)}... (usage: ${templateRef.usageCount})`);
       } else {
         // Fall back to inline template (legacy)
         let assessmentTemplate = data.assessment.template;
@@ -673,7 +675,7 @@ router.post('/:id/start', enforceTimer, async (req: ExpressRequest, res: Express
           try {
             assessmentTemplate = JSON.parse(assessmentTemplate);
           } catch (e) {
-            console.error('Failed to parse assessment template:', e);
+            logger.error('Failed to parse assessment template:', e);
             assessmentTemplate = null;
           }
         }
@@ -696,11 +698,11 @@ router.post('/:id/start', enforceTimer, async (req: ExpressRequest, res: Express
       // Extract file structure IMMEDIATELY (no waiting)
       if (templateSpec && templateSpec.fileStructure) {
         templateFiles = templateSpec.fileStructure;
-        console.log(`📁 Extracted ${templateFiles ? Object.keys(templateFiles).length : 0} template files immediately from ${data.assessment.templateRef ? 'reusable template' : 'inline template'}`);
+        logger.log(`📁 Extracted ${templateFiles ? Object.keys(templateFiles).length : 0} template files immediately from ${data.assessment.templateRef ? 'reusable template' : 'inline template'}`);
         // If we have template files, this is likely an IDE challenge that needs a container
         needsContainer = templateFiles !== null && Object.keys(templateFiles).length > 0;
       } else {
-        console.log('ℹ️ No template files found in assessment (code challenge or template files not stored)');
+        logger.log('ℹ️ No template files found in assessment (code challenge or template files not stored)');
       }
 
       // Only provision container for IDE challenges (which have templateFiles)
@@ -718,7 +720,7 @@ router.post('/:id/start', enforceTimer, async (req: ExpressRequest, res: Express
         if (templateRef?.dockerImage) {
           templateImage = templateRef.dockerImage;
           templateId = templateRef.id;
-          console.log(`🐳 Using Docker image from reusable template: ${templateImage}`);
+          logger.log(`🐳 Using Docker image from reusable template: ${templateImage}`);
         } else {
           // Fall back to constructing image name (legacy)
           const role = data.assessment.role?.toLowerCase() || 'general';
@@ -728,17 +730,17 @@ router.post('/:id/start', enforceTimer, async (req: ExpressRequest, res: Express
           const level = data.assessment.level?.toLowerCase() || 'mid';
           templateImage = `promora/${role}-${stack}-${level}:latest`;
           templateId = templateRef?.id || `template-${data.assessment.id}`;
-          console.log(`🐳 Constructed Docker image name: ${templateImage} (template not found or no Docker image)`);
+          logger.log(`🐳 Constructed Docker image name: ${templateImage} (template not found or no Docker image)`);
         }
 
         // Start container provisioning in background (non-blocking)
         containerManager.createSessionContainer(id, templateImage, templateId)
           .then(container => {
-            console.log(`✅ Container provisioned asynchronously for session ${id}:`, container.containerId);
+            logger.log(`✅ Container provisioned asynchronously for session ${id}:`, container.containerId);
             // TODO: Optionally update session with container info via WebSocket or polling
           })
           .catch(error => {
-            console.error(`⚠️ Failed to provision container in background (continuing without): ${error.message}`);
+            logger.error(`⚠️ Failed to provision container in background (continuing without): ${error.message}`);
             // Container provisioning failure doesn't block session start
             // Candidate can still work with template files
           });
@@ -749,7 +751,7 @@ router.post('/:id/start', enforceTimer, async (req: ExpressRequest, res: Express
           message: 'Container is being provisioned in the background'
         };
       } else {
-        console.log(`⏩ Skipping container provisioning for code challenge (no template files needed)`);
+        logger.log(`⏩ Skipping container provisioning for code challenge (no template files needed)`);
       }
     }
 
@@ -784,7 +786,7 @@ router.post('/:id/start', enforceTimer, async (req: ExpressRequest, res: Express
             try {
               template = JSON.parse(template);
             } catch (e) {
-              console.error('Failed to parse assessment template:', e);
+              logger.error('Failed to parse assessment template:', e);
               template = null;
             }
           }
@@ -819,7 +821,7 @@ router.post('/:id/start', enforceTimer, async (req: ExpressRequest, res: Express
         }
       }
 
-      console.log('📋 Session start: Including assessment template:', {
+      logger.log('📋 Session start: Including assessment template:', {
         hasTemplate: !!template,
         suggestedAssessmentsCount: suggestedAssessments.length,
         templateFilesCount: response.templateFiles ? Object.keys(response.templateFiles).length : 0,
@@ -829,7 +831,7 @@ router.post('/:id/start', enforceTimer, async (req: ExpressRequest, res: Express
     }
 
     const responseTime = Date.now() - startTime;
-    console.log(`⚡ Session start response ready in ${responseTime}ms (container provisioning: ${needsContainer ? 'background' : 'skipped'})`);
+    logger.log(`⚡ Session start response ready in ${responseTime}ms (container provisioning: ${needsContainer ? 'background' : 'skipped'})`);
 
     res.json({ 
       success: true, 
@@ -1185,7 +1187,8 @@ router.post('/bulk', authenticate, requireRole(['recruiter']), upload.single('cs
           sessionCode,
           assessmentUrl,
           jobTitle,
-          timeLimitMinutes
+          timeLimitMinutes,
+          expiresAt || undefined
         );
 
         const emailResult = await sendEmail(emailOptions);
@@ -1198,7 +1201,7 @@ router.post('/bulk', authenticate, requireRole(['recruiter']), upload.single('cs
       } catch (error: any) {
         results.failed++;
         results.errors.push(`Error processing ${candidate.email}: ${error.message}`);
-        console.error(`Error creating session for ${candidate.email}:`, error);
+        logger.error(`Error creating session for ${candidate.email}:`, error);
       }
     }
 
@@ -1210,7 +1213,7 @@ router.post('/bulk', authenticate, requireRole(['recruiter']), upload.single('cs
       }
     });
   } catch (error: any) {
-    console.error('Bulk session creation error:', error);
+    logger.error('Bulk session creation error:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to create bulk sessions'

@@ -5,6 +5,7 @@ import { authenticate } from '../middleware/rbac';
 import { videoUploadLimiter } from '../middleware/rate-limiter';
 import { prisma } from '../lib/prisma';
 import { buildCompanyLogoPath, buildRecruiterImagePath, buildCandidateImagePath, getFileExtension } from '../lib/storage-utils';
+import { logger } from '../lib/logger';
 
 const router = Router();
 
@@ -90,7 +91,7 @@ router.post('/profile-image', authenticate, videoUploadLimiter, upload.single('i
         });
 
       if (error) {
-        console.error('Supabase upload error:', error);
+        logger.error('Supabase upload error:', error);
         throw error;
       }
 
@@ -102,22 +103,32 @@ router.post('/profile-image', authenticate, videoUploadLimiter, upload.single('i
         .from(bucket)
         .getPublicUrl(filePath);
 
+      const publicUrl = urlData.publicUrl;
+      
+      // Debug logging
+      logger.log('📸 Profile image uploaded successfully');
+      logger.log('📸 File path:', filePath);
+      logger.log('📸 Bucket:', bucket);
+      logger.log('📸 Public URL:', publicUrl);
+      logger.log('📸 User ID:', userId);
+      logger.log('📸 User role:', userRole);
+
       res.json({
         success: true,
         data: {
-          url: urlData.publicUrl,
+          url: publicUrl,
           filename: filePath.split('/').pop() || 'profile_image.jpg'
         }
       });
     } catch (supabaseError: any) {
-      console.error('Supabase upload failed:', supabaseError);
+      logger.error('Supabase upload failed:', supabaseError);
       return res.status(500).json({
         success: false,
         error: 'Failed to upload image to storage'
       });
     }
   } catch (error: any) {
-    console.error('Profile image upload error:', error);
+    logger.error('Profile image upload error:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to upload profile image'
@@ -191,7 +202,7 @@ router.post('/company-logo', authenticate, videoUploadLimiter, upload.single('im
         });
 
       if (error) {
-        console.error('Supabase upload error:', error);
+        logger.error('Supabase upload error:', error);
         throw error;
       }
 
@@ -211,14 +222,14 @@ router.post('/company-logo', authenticate, videoUploadLimiter, upload.single('im
         }
       });
     } catch (supabaseError: any) {
-      console.error('Supabase upload failed:', supabaseError);
+      logger.error('Supabase upload failed:', supabaseError);
       return res.status(500).json({
         success: false,
         error: 'Failed to upload image to storage'
       });
     }
   } catch (error: any) {
-    console.error('Company logo upload error:', error);
+    logger.error('Company logo upload error:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to upload company logo'

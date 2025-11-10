@@ -9,6 +9,7 @@
 
 import * as crypto from 'crypto';
 import { PrismaClient } from '@prisma/client';
+import { logger } from './logger';
 
 const prisma = new PrismaClient();
 
@@ -61,7 +62,7 @@ export async function findTemplateByHash(templateHash: string) {
       }
     });
   } catch (error) {
-    console.error('Error finding template by hash:', error);
+    logger.error('Error finding template by hash:', error);
     return null;
   }
 }
@@ -116,10 +117,10 @@ export async function createTemplate(params: {
       }
     });
     
-    console.log(`✅ Created new template with hash: ${templateHash.substring(0, 8)}...`);
+    logger.log(`✅ Created new template with hash: ${templateHash.substring(0, 8)}...`);
     return template;
   } catch (error: any) {
-    console.error('Error creating template:', error);
+    logger.error('Error creating template:', error);
     throw new Error(`Failed to create template: ${error.message}`);
   }
 }
@@ -148,7 +149,7 @@ export async function findOrCreateTemplate(params: {
       data: { usageCount: { increment: 1 } }
     });
     
-    console.log(`♻️ Reusing existing template (hash: ${existingTemplate.templateHash.substring(0, 8)}..., usage: ${updated.usageCount})`);
+    logger.log(`♻️ Reusing existing template (hash: ${existingTemplate.templateHash.substring(0, 8)}..., usage: ${updated.usageCount})`);
     return updated;
   }
   
@@ -185,7 +186,7 @@ export async function updateTemplateBuildStatus(
       }
     });
   } catch (error: any) {
-    console.error('Error updating template build status:', error);
+    logger.error('Error updating template build status:', error);
     throw new Error(`Failed to update template build status: ${error.message}`);
   }
 }
@@ -211,7 +212,7 @@ export async function getTemplateById(templateId: string) {
       }
     });
   } catch (error) {
-    console.error('Error getting template by ID:', error);
+    logger.error('Error getting template by ID:', error);
     return null;
   }
 }

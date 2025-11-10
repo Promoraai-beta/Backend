@@ -9,6 +9,7 @@ import { spawn, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import * as path from 'path';
 import * as fs from 'fs';
+import { logger } from '../lib/logger';
 
 interface MCPTool {
   name: string;
@@ -62,12 +63,12 @@ export class MCPClient extends EventEmitter {
         logLines.forEach(line => {
           // Parse Python logging format: LEVEL:module:message
           if (line.includes('ERROR:')) {
-            console.error(`[MCP Server] ${line}`);
+            logger.error(`[MCP Server] ${line}`);
           } else if (line.includes('WARNING:') || line.includes('WARN:')) {
-            console.warn(`[MCP Server] ${line}`);
+            logger.warn(`[MCP Server] ${line}`);
           } else {
             // INFO, DEBUG, and other logs
-            console.log(`[MCP Server] ${line}`);
+            logger.log(`[MCP Server] ${line}`);
           }
         });
       });
@@ -223,7 +224,7 @@ export class MCPClient extends EventEmitter {
         const message = JSON.parse(line);
         this.handleMessage(message);
       } catch (e) {
-        console.error(`[MCP Client] Failed to parse message: ${line}`);
+        logger.error(`[MCP Client] Failed to parse message: ${line}`);
       }
     }
   }
@@ -328,12 +329,12 @@ export function getMCPClientManager(): MCPClientManager {
     const mcpServersPath = path.join(projectRoot, 'mcp-servers');
     
     // Debug logging
-    console.log(`[MCP Client] Backend dir: ${backendDir}`);
-    console.log(`[MCP Client] Looking for servers at: ${mcpServersPath}`);
+    logger.log(`[MCP Client] Backend dir: ${backendDir}`);
+    logger.log(`[MCP Client] Looking for servers at: ${mcpServersPath}`);
     
     const serverAPath = path.join(mcpServersPath, 'server-a-job-analysis/src/server.py');
     const serverAExists = fs.existsSync(serverAPath);
-    console.log(`[MCP Client] Server A exists: ${serverAExists} at ${serverAPath}`);
+    logger.log(`[MCP Client] Server A exists: ${serverAExists} at ${serverAPath}`);
     
     if (!serverAExists) {
       throw new Error(`MCP server not found at: ${serverAPath}`);

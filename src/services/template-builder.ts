@@ -13,6 +13,7 @@ import { existsSync } from 'fs';
 // @ts-ignore - tar-fs doesn't have type definitions
 import * as tar from 'tar-fs';
 import { TemplateSpec } from '../mcp/types';
+import { logger } from '../lib/logger';
 
 // Docker connection - handles both Linux and macOS/Windows (Docker Desktop)
 const dockerOptions: any = {};
@@ -28,7 +29,7 @@ if (process.platform === 'darwin') {
   for (const socketPath of macPaths) {
     if (socketPath && existsSync(socketPath)) {
       dockerOptions.socketPath = socketPath;
-      console.log(`🐳 Using Docker socket: ${socketPath}`);
+      logger.log(`🐳 Using Docker socket: ${socketPath}`);
       break;
     }
   }
@@ -203,7 +204,7 @@ export class TemplateBuilder {
       : `promora/${spec.name}:latest`;
 
     try {
-      console.log(`🔨 Building template: ${templateId}`);
+      logger.log(`🔨 Building template: ${templateId}`);
       
       // Prepare build directory
       const buildPath = await this.prepareBuildDirectory(templateId, spec);
@@ -233,16 +234,16 @@ export class TemplateBuilder {
 
       const buildTime = Date.now() - startTime;
 
-      console.log(`✅ Template built successfully: ${imageName} (${(buildTime / 1000).toFixed(2)}s)`);
+      logger.log(`✅ Template built successfully: ${imageName} (${(buildTime / 1000).toFixed(2)}s)`);
 
       // Push to registry if configured (production)
       if (registry && process.env.NODE_ENV === 'production') {
         try {
-          console.log(`📤 Pushing image to registry: ${imageName}`);
+          logger.log(`📤 Pushing image to registry: ${imageName}`);
           await this.pushImageToRegistry(imageName);
-          console.log(`✅ Image pushed to registry successfully`);
+          logger.log(`✅ Image pushed to registry successfully`);
         } catch (pushError: any) {
-          console.error(`⚠️ Failed to push image to registry: ${pushError.message}`);
+          logger.error(`⚠️ Failed to push image to registry: ${pushError.message}`);
           // Continue even if push fails - image is still available locally
         }
       }
@@ -255,7 +256,7 @@ export class TemplateBuilder {
         imageSize: Math.round(imageSize / 1024 / 1024) // Convert to MB
       };
     } catch (error: any) {
-      console.error(`❌ Template build failed: ${error.message}`);
+      logger.error(`❌ Template build failed: ${error.message}`);
       
       return {
         templateId,
@@ -381,7 +382,7 @@ export class TemplateBuilder {
         await container.remove();
       }
     } catch (error: any) {
-      console.error(`Failed to stop container ${containerId}: ${error.message}`);
+      logger.error(`Failed to stop container ${containerId}: ${error.message}`);
     }
   }
 
@@ -402,7 +403,7 @@ export class TemplateBuilder {
 
       return true;
     } catch (error: any) {
-      console.error(`Template test failed: ${error.message}`);
+      logger.error(`Template test failed: ${error.message}`);
       return false;
     }
   }

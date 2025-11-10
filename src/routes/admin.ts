@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { authenticate, requireRole } from '../middleware/rbac';
 import { apiLimiter } from '../middleware/rate-limiter';
 import * as crypto from 'crypto';
+import { logger } from '../lib/logger';
 
 const router = Router();
 
@@ -121,7 +122,7 @@ router.get('/stats', apiLimiter, authenticate, requireRole(['admin']), async (re
       }
     });
   } catch (error: any) {
-    console.error('Get admin stats error:', error);
+    logger.error('Get admin stats error:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to get admin statistics'
@@ -178,7 +179,7 @@ router.get('/users', apiLimiter, authenticate, requireRole(['admin']), async (re
       }
     });
   } catch (error: any) {
-    console.error('Get admin users error:', error);
+    logger.error('Get admin users error:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to get users'
@@ -248,7 +249,7 @@ router.post('/invitations', apiLimiter, authenticate, requireRole(['admin']), as
       }
     });
   } catch (error: any) {
-    console.error('Create invitation error:', error);
+    logger.error('Create invitation error:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to create invitation'
@@ -284,7 +285,7 @@ router.get('/invitations', apiLimiter, authenticate, requireRole(['admin']), asy
       data: invitationsWithUrls
     });
   } catch (error: any) {
-    console.error('Get invitations error:', error);
+    logger.error('Get invitations error:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to get invitations'

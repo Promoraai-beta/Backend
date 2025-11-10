@@ -6,6 +6,7 @@
  */
 
 import { templateBuilder, ContainerInfo } from './template-builder';
+import { logger } from '../lib/logger';
 
 export interface SessionContainer {
   sessionId: string;
@@ -28,7 +29,7 @@ export class ContainerManager {
     templateId: string
   ): Promise<ContainerInfo> {
     try {
-      console.log(`🚀 Creating container for session: ${sessionId}`);
+      logger.log(`🚀 Creating container for session: ${sessionId}`);
 
       // Record that we're creating
       this.sessionContainers.set(sessionId, {
@@ -54,11 +55,11 @@ export class ContainerManager {
 
       this.sessionContainers.set(sessionId, sessionContainer);
 
-      console.log(`✅ Container created: ${containerInfo.containerId} for session ${sessionId}`);
+      logger.log(`✅ Container created: ${containerInfo.containerId} for session ${sessionId}`);
       
       return containerInfo;
     } catch (error: any) {
-      console.error(`❌ Failed to create container: ${error.message}`);
+      logger.error(`❌ Failed to create container: ${error.message}`);
       throw error;
     }
   }
@@ -116,12 +117,12 @@ export class ContainerManager {
     }
 
     for (const sessionId of expired) {
-      console.log(`🧹 Cleaning up expired container for session: ${sessionId}`);
+      logger.log(`🧹 Cleaning up expired container for session: ${sessionId}`);
       await this.removeSessionContainer(sessionId);
     }
 
     if (expired.length > 0) {
-      console.log(`✅ Cleaned up ${expired.length} expired containers`);
+      logger.log(`✅ Cleaned up ${expired.length} expired containers`);
     }
   }
 
@@ -137,6 +138,6 @@ export const containerManager = new ContainerManager();
 
 // Run cleanup every hour
 setInterval(() => {
-  containerManager.cleanupExpiredContainers().catch(console.error);
+  containerManager.cleanupExpiredContainers().catch((error) => logger.error('Cleanup error:', error));
 }, 60 * 60 * 1000);
 
