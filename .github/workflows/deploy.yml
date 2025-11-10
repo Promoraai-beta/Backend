@@ -15,17 +15,17 @@ jobs:
     steps:
       - name: Setup SSH Key
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key.pem
-          chmod 600 ~/.ssh/deploy_key.pem
-          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+          mkdir -p $HOME/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > $HOME/.ssh/deploy_key.pem
+          chmod 600 $HOME/.ssh/deploy_key.pem
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> $HOME/.ssh/known_hosts 2>/dev/null || true
       
       - name: Deploy to EC2
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
-          key_path: ~/.ssh/deploy_key.pem
+          key_path: /home/runner/.ssh/deploy_key.pem
           port: 22
           timeout: 30s
           script: |
