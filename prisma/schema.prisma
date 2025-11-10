@@ -1,0 +1,310 @@
+// Prisma Schema for Promora Assessment Platform
+// This file defines the database models
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User model - base authentication
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String // Hashed password
+  name      String
+  role      String // "candidate" | "recruiter" | "admin"
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  candidateProfile CandidateProfile?
+  recruiterProfile RecruiterProfile?
+  sessions         Session[] // Sessions where user is candidate
+
+  @@map("users")
+}
+
+// Candidate Profile
+model CandidateProfile {
+  id                   String   @id @default(uuid())
+  userId               String   @unique @map("user_id")
+  title                String? // Job title
+  location             String?
+  bio                  String?  @db.Text
+  avatar               String? // URL to avatar image
+  skills               Json?    @db.JsonB // Array of skills
+  interests            Json?    @db.JsonB // Array of interests/testing preferences
+  targetRole           String?  @map("target_role")
+  promptIQScore        Int      @default(0) @map("prompt_iq_score")
+  totalPoints          Int      @default(0) @map("total_points")
+  level                String?  @default("Beginner") // Beginner, Intermediate, Advanced, Expert
+  assessmentsCompleted Int      @default(0) @map("assessments_completed")
+  achievements         Json?    @db.JsonB // Array of achievements
+  isPublic             Boolean  @default(false) @map("is_public")
+  joinedDate           DateTime @default(now()) @map("joined_date")
+  onboardingCompleted  Boolean  @default(false) @map("onboarding_completed")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("candidate_profiles")
+}
+
+// Recruiter Profile
+model RecruiterProfile {
+  id                  String   @id @default(uuid())
+  userId              String   @unique @map("user_id")
+  companyId           String?  @map("company_id")
+  position            String? // Job position/title
+  department          String?
+  avatar              String? // URL to avatar image
+  onboardingCompleted Boolean  @default(false) @map("onboarding_completed")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  @@map("recruiter_profiles")
+}
+
+// Company model
+model Company {
+  id          String   @id @default(uuid())
+  name        String
+  industry    String?
+  size        String? // e.g., "500-1000 employees"
+  location    String?
+  website     String?
+  description String?  @db.Text
+  logo        String? // URL to logo image
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  recruiters  RecruiterProfile[]
+  assessments Assessment[] // Assessments created by company
+  invitations Invitation[] // Invitations for this company
+
+  @@map("companies")
+}
+
+// Invitation model for recruiter signup
+model Invitation {
+  id          String    @id @default(uuid())
+  token       String    @unique // Unique token for invitation link
+  email       String? // Optional: specific email invitation
+  companyId   String?   @map("company_id")
+  companyName String?   @map("company_name") // Company name if company doesn't exist yet
+  role        String    @default("recruiter") // Always recruiter for now
+  usedBy      String?   @map("used_by") // User ID who used the invitation
+  usedAt      DateTime? @map("used_at")
+  expiresAt   DateTime? @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  createdBy   String?   @map("created_by") // User ID of admin who created invitation
+  company     Company?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  @@index([token])
+  @@index([email])
+  @@map("invitations")
+}
+
+// Reusable Template model - stores template specs that can be reused across assessments
+model Template {
+  id                   String   @id @default(uuid())
+  templateHash         String   @unique @map("template_hash") // Hash based on role/stack/level for quick lookup
+  role                 String?
+  techStack            Json?    @map("tech_stack") @db.JsonB
+  level                String?
+  templateSpec         Json     @map("template_spec") @db.JsonB // The complete template specification with fileStructure
+  suggestedAssessments Json?    @map("suggested_assessments") @db.JsonB // Pre-generated assessment tasks
+  dockerImage          String?  @map("docker_image") // Docker image name if built
+  dockerImageBuilt     Boolean  @default(false) @map("docker_image_built") // Whether Docker image has been built
+  webcontainerReady    Boolean  @default(false) @map("webcontainer_ready") // Whether WebContainer template is ready
+  buildStatus          String   @default("pending") @map("build_status") // 'pending', 'building', 'ready', 'failed'
+  buildError           String?  @map("build_error") @db.Text
+  usageCount           Int      @default(0) @map("usage_count") // How many assessments use this template
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  assessments Assessment[] // Assessments using this template
+
+  @@index([templateHash])
+  @@index([role, level])
+  @@index([buildStatus])
+  @@map("templates")
+}
+
+model Assessment {
+  id             String   @id @default(uuid())
+  jobTitle       String?  @map("job_title")
+  companyId      String?  @map("company_id")
+  jobDescription String?  @map("job_description") @db.Text
+  role           String?
+  techStack      Json?    @map("tech_stack") @db.JsonB // Use JSONB instead of JSON for better performance
+  level          String?
+  templateId     String?  @map("template_id") // Reference to reusable Template
+  template       Json?    @db.JsonB // Use JSONB instead of JSON for better performance (legacy - kept for backward compatibility)
+  sourceUrl      String?  @map("source_url")
+  sourceType     String?  @map("source_type") // 'url', 'manual', or 'self-assessment'
+  assessmentType String?  @default("recruiter") @map("assessment_type") // 'recruiter' or 'candidate' - distinguishes creation context
+  isActive       Boolean  @default(true) @map("is_active") // Whether the job/assessment is active (recruitment open)
+  createdBy      String?  @map("created_by") // User ID of creator (recruiter or candidate)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  company     Company?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  templateRef Template? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  sessions    Session[]
+
+  @@index([level])
+  @@index([role])
+  @@index([isActive])
+  @@index([templateId])
+  @@map("assessments")
+}
+
+model Session {
+  id               String    @id @default(uuid())
+  sessionCode      String    @unique @map("session_code") // Use session_code column (varchar)
+  candidateId      String?   @map("candidate_id") // User ID of candidate
+  candidateName    String?   @map("candidate_name")
+  candidateEmail   String?   @map("candidate_email")
+  recruiterEmail   String?   @map("recruiter_email")
+  assessmentId     String?   @map("assessment_id")
+  status           String    @default("pending") // pending, active, submitted, ended, completed
+  startedAt        DateTime? @map("started_at")
+  submittedAt      DateTime? @map("submitted_at")
+  timeLimit        Int       @default(3600) @map("time_limit") // seconds
+  selectedLlm      String?   @map("selected_llm")
+  finalCode        String?   @map("final_code") @db.Text
+  expiresAt        DateTime? @map("expires_at")
+  lastActivityAt   DateTime? @map("last_activity_at") // Track last activity for inactivity timeout
+  tabSwitchCount   Int       @default(0) @map("tab_switch_count") // Track number of tab switches
+  lastTabSwitchAt  DateTime? @map("last_tab_switch_at") // Track last tab switch timestamp
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  candidate      User?           @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  assessment     Assessment?     @relation(fields: [assessmentId], references: [id])
+  codeSnapshots  CodeSnapshot[]
+  events         Event[]
+  videoChunks    VideoChunk[]
+  submissions    Submission[]
+  aiInteractions AiInteraction[]
+  agentInsights  AgentInsight[]
+
+  @@index([sessionCode])
+  @@index([status])
+  @@index([assessmentId])
+  @@index([lastActivityAt])
+  @@map("sessions")
+}
+
+model CodeSnapshot {
+  id        String   @id @default(uuid())
+  sessionId String   @map("session_id")
+  timestamp DateTime @default(now())
+  code      String   @db.Text
+  lineCount Int      @map("line_count")
+  language  String
+  createdAt DateTime @default(now()) @map("created_at")
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("code_snapshots")
+}
+
+model Event {
+  id        String   @id @default(uuid())
+  sessionId String   @map("session_id")
+  eventType String   @map("event_type")
+  timestamp DateTime @default(now())
+  metadata  Json?    @db.JsonB
+  createdAt DateTime @default(now()) @map("created_at")
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([eventType])
+  @@map("events")
+}
+
+model VideoChunk {
+  id         String   @id @default(uuid())
+  sessionId  String   @map("session_id")
+  chunkIndex Int      @map("chunk_index")
+  streamType String   @default("screenshare") @map("stream_type") // 'webcam' | 'screenshare' | 'combined'
+  url        String
+  sizeBytes  BigInt   @map("size_bytes")
+  uploadedAt DateTime @default(now()) @map("uploaded_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  session    Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([sessionId, streamType, chunkIndex])
+  @@map("video_chunks")
+}
+
+model Submission {
+  id          String   @id @default(uuid())
+  sessionId   String   @map("session_id")
+  problemId   Int?     @map("problem_id")
+  code        String   @db.Text
+  language    String
+  testResults Json?    @map("test_results") @db.JsonB
+  score       Int      @default(0)
+  passedTests Int      @default(0) @map("passed_tests")
+  totalTests  Int      @default(0) @map("total_tests")
+  submittedAt DateTime @default(now()) @map("submitted_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([problemId])
+  @@map("submissions")
+}
+
+model AiInteraction {
+  id             String   @id @default(uuid())
+  sessionId      String   @map("session_id")
+  eventType      String   @map("event_type")
+  timestamp      DateTime @default(now())
+  model          String?
+  promptText     String?  @map("prompt_text") @db.Text
+  responseText   String?  @map("response_text") @db.Text
+  tokensUsed     Int?     @map("tokens_used")
+  codeSnippet    String?  @map("code_snippet") @db.Text
+  codeLineNumber Int?     @map("code_line_number")
+  codeBefore     String?  @map("code_before") @db.Text
+  codeAfter      String?  @map("code_after") @db.Text
+  metadata       Json?    @db.JsonB
+  createdAt      DateTime @default(now()) @map("created_at")
+  session        Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([eventType])
+  @@index([timestamp])
+  @@index([sessionId, timestamp])
+  @@map("ai_interactions")
+}
+
+// Agent Insights model - stores computed agent analysis results
+model AgentInsight {
+  id         String   @id @default(uuid())
+  sessionId  String   @unique @map("session_id")
+  watcher    Json?    @db.JsonB // Agent 6: Real-time monitoring results
+  extractor  Json?    @db.JsonB // Agent 7: Code analysis results
+  sanity     Json?    @db.JsonB // Agent 8: Risk assessment results
+  computedAt DateTime @default(now()) @map("computed_at") // When insights were computed
+  updatedAt  DateTime @updatedAt @map("updated_at") // When insights were last updated
+  version    Int      @default(1) // Version number for tracking changes
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([computedAt])
+  @@map("agent_insights")
+}
