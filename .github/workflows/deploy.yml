@@ -111,6 +111,10 @@ jobs:
           scp -i ~/.ssh/deploy_key \
               -o StrictHostKeyChecking=no \
               -r prisma/ ubuntu@${{ secrets.EC2_HOST }}:/opt/promora/Backend/
+          # Copy docker-compose.yml to EC2 (needed for environment variables)
+          scp -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              docker-compose.yml ubuntu@${{ secrets.EC2_HOST }}:/opt/promora/
           
           # Run deployment
           ssh -i ~/.ssh/deploy_key \
