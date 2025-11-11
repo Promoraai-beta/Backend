@@ -4,6 +4,8 @@ import { authenticate, requireRole } from '../middleware/rbac';
 import { apiLimiter } from '../middleware/rate-limiter';
 import * as crypto from 'crypto';
 import { logger } from '../lib/logger';
+import { getFrontendUrl } from '../lib/frontend-url';
+import { sendEmail, generateRecruiterInvitationEmail } from '../lib/email';
 
 const router = Router();
 
@@ -232,8 +234,39 @@ router.post('/invitations', apiLimiter, authenticate, requireRole(['admin']), as
     });
 
     // Generate invitation URL
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const frontendUrl = getFrontendUrl();
     const invitationUrl = `${frontendUrl}/invite/${token}`;
+
+    // Send invitation email if email is provided
+    if (email) {
+      try {
+        const companyName = invitation.companyName || invitation.company?.name || 'Our Company';
+        const emailOptions = generateRecruiterInvitationEmail(
+          email,
+          null, // recruiterName - not known yet
+          companyName,
+          invitationUrl,
+          invitation.expiresAt || undefined
+        );
+
+        // Send email in background (don't wait for it)
+        sendEmail(emailOptions).then((result) => {
+          if (result.success) {
+            logger.log(`✅ Invitation email sent successfully to: ${email}`);
+          } else {
+            logger.error(`❌ Failed to send invitation email to ${email}:`, result.error);
+          }
+        }).catch((error) => {
+          logger.error('❌ Error sending invitation email:', error);
+          // Don't fail the request if email fails
+        });
+      } catch (emailError) {
+        logger.error('❌ Error preparing invitation email:', emailError);
+        // Don't fail the request if email preparation fails
+      }
+    } else {
+      logger.log('⚠️ No email provided for invitation - email will not be sent');
+    }
 
     res.json({
       success: true,
@@ -273,7 +306,7 @@ router.get('/invitations', apiLimiter, authenticate, requireRole(['admin']), asy
       take: 100
     });
 
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const frontendUrl = getFrontendUrl();
 
     const invitationsWithUrls = invitations.map(inv => ({
       ...inv,

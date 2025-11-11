@@ -6,6 +6,7 @@ import jwt from 'jsonwebtoken';
 import { authLimiter } from '../middleware/rate-limiter';
 import { validateEmail, validatePassword, handleValidationErrors } from '../middleware/validation';
 import { sendEmail, generatePasswordResetEmail } from '../lib/email';
+import { getFrontendUrl } from '../lib/frontend-url';
 
 const router = Router();
 
@@ -353,7 +354,7 @@ router.post('/forgot-password', authLimiter, validateEmail, handleValidationErro
     });
 
     // Send email with reset code
-    const frontendUrl = process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:3000';
+    const frontendUrl = getFrontendUrl();
     const resetUrl = `${frontendUrl}/forgot-password`;
     const emailOptions = generatePasswordResetEmail(
       user.email,

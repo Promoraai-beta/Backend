@@ -9,6 +9,7 @@ import { checkSessionInactivity } from '../services/inactivity-monitor';
 import { authenticate, checkSessionOwnership, optionalAuthenticate, requireRole } from '../middleware/rbac';
 import * as jwt from 'jsonwebtoken';
 import { sendEmail, generateAssessmentEmail } from '../lib/email';
+import { getFrontendUrl } from '../lib/frontend-url';
 import multer from 'multer';
 import { logger } from '../lib/logger';
 
@@ -158,7 +159,7 @@ router.post('/', apiLimiter, optionalAuthenticate, validateSessionCreation, asyn
           const companyName = data.assessment.company?.name || recruiterProfile.company?.name || 'Our Company';
           const recruiterName = recruiterProfile.user?.name || 'Recruiter';
           const jobTitle = data.assessment.jobTitle || data.assessment.role || undefined;
-          const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+          const frontendUrl = getFrontendUrl();
           const assessmentUrl = `${frontendUrl}/assessment/${sessionCode}`;
           const timeLimitMinutes = data.timeLimit ? Math.floor(data.timeLimit / 60) : undefined;
 
@@ -1131,7 +1132,7 @@ router.post('/bulk', authenticate, requireRole(['recruiter']), upload.single('cs
       errors: [] as string[]
     };
 
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const frontendUrl = getFrontendUrl();
 
     for (const candidate of uniqueCandidates) {
       try {
