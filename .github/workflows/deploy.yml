@@ -17,35 +17,12 @@ jobs:
         run: |
           mkdir -p ~/.ssh
 
-          # Write private key exactly as-is (prevents libcrypto/key format issues)
           cat > ~/.ssh/deploy_key << 'KEY'
           ${{ secrets.EC2_SSH_KEY }}
           KEY
           chmod 600 ~/.ssh/deploy_key
 
-          # Optional validation
-          if ssh-keygen -l -f ~/.ssh/deploy_key > /dev/null 2>&1; then
-            echo "Key format is valid (ssh-keygen)"
-          elif openssl rsa -in ~/.ssh/deploy_key -check -noout > /dev/null 2>&1; then
-            echo "Key format is valid (openssl rsa)"
-          elif openssl pkey -in ~/.ssh/deploy_key -check -noout > /dev/null 2>&1; then
-            echo "Key format is valid (openssl pkey)"
-          else
-            echo "Key format validation failed"
-            exit 1
-          fi
-
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
-
-      # ✅ ADD THIS STEP (right after Setup SSH)
-      - name: SSH debug
-        run: |
-          EC2_USER="${{ secrets.EC2_USER }}"
-          EC2_HOST="${{ secrets.EC2_HOST }}"
-          ssh -vvv -i ~/.ssh/deploy_key \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=no \
-            ${EC2_USER}@${EC2_HOST} "whoami"
 
       - name: Checkout code
         uses: actions/checkout@v3
@@ -126,17 +103,6 @@ jobs:
               -o StrictHostKeyChecking=no \
               /tmp/ci-deploy.sh ${EC2_USER}@${EC2_HOST}:/opt/promora/scripts/ci-deploy.sh
 
-          # Copy Backend src and prisma directories to EC2
-          scp -i ~/.ssh/deploy_key \
-              -o IdentitiesOnly=yes \
-              -o StrictHostKeyChecking=no \
-              -r src/ ${EC2_USER}@${EC2_HOST}:/opt/promora/Backend/
-
-          scp -i ~/.ssh/deploy_key \
-              -o IdentitiesOnly=yes \
-              -o StrictHostKeyChecking=no \
-              -r prisma/ ${EC2_USER}@${EC2_HOST}:/opt/promora/Backend/
-
           # Copy docker-compose.yml to EC2
           scp -i ~/.ssh/deploy_key \
               -o IdentitiesOnly=yes \
@@ -147,7 +113,6 @@ jobs:
           ssh -i ~/.ssh/deploy_key \
               -o IdentitiesOnly=yes \
               -o StrictHostKeyChecking=no \
-              -o UserKnownHostsFile=~/.ssh/known_hosts \
               -o BatchMode=yes \
               ${EC2_USER}@${EC2_HOST} << 'EOF'
             cd /opt/promora
