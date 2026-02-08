@@ -16,17 +16,20 @@ jobs:
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
-          printf '%s' "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
-          if [ "$(tail -c 1 ~/.ssh/deploy_key)" != "" ]; then
-            echo "" >> ~/.ssh/deploy_key
-          fi
+
+          # Write private key exactly as-is (prevents libcrypto/key format issues)
+          cat > ~/.ssh/deploy_key << 'KEY'
+          ${{ secrets.EC2_SSH_KEY }}
+          KEY
           chmod 600 ~/.ssh/deploy_key
+
+          # Optional validation (won't fail the job if these tools don't like the format)
           if ssh-keygen -l -f ~/.ssh/deploy_key > /dev/null 2>&1; then
-            echo "Key format is valid"
+            echo "Key format is valid (ssh-keygen)"
           elif openssl rsa -in ~/.ssh/deploy_key -check -noout > /dev/null 2>&1; then
-            echo "Key format is valid"
+            echo "Key format is valid (openssl rsa)"
           elif openssl pkey -in ~/.ssh/deploy_key -check -noout > /dev/null 2>&1; then
-            echo "Key format is valid"
+            echo "Key format is valid (openssl pkey)"
           else
             echo "Key format validation failed"
             exit 1
@@ -141,3 +144,4 @@ jobs:
             chmod +x scripts/ci-deploy.sh
             ./scripts/ci-deploy.sh backend
           EOF
+
