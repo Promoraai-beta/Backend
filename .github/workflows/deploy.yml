@@ -20,78 +20,94 @@ jobs:
       - name: Send deploy command (backend)
         id: send
         run: |
+          set -euo pipefail
+
           INSTANCE_ID="${{ secrets.EC2_INSTANCE_ID }}"
           WORKDIR="${{ secrets.SSM_WORKING_DIR }}"
+          REGION="${{ secrets.AWS_REGION }}"
 
-          if [ -z "$WORKDIR" ]; then WORKDIR="/opt/promora"; fi
-          if [ -z "$INSTANCE_ID" ]; then
+          if [ -z "${WORKDIR}" ]; then WORKDIR="/opt/promora"; fi
+          if [ -z "${INSTANCE_ID}" ]; then
             echo "ERROR: EC2_INSTANCE_ID secret is missing/empty"
             exit 1
           fi
+          if [ -z "${REGION}" ]; then
+            echo "ERROR: AWS_REGION secret is missing/empty"
+            exit 1
+          fi
 
-          echo "Using instance: $INSTANCE_ID"
-          echo "Using workdir: $WORKDIR"
+          echo "Region: ${REGION}"
+          echo "Instance: ${INSTANCE_ID}"
+          echo "Workdir: ${WORKDIR}"
+
+          echo "Verifying instance is a managed node in this region..."
+          aws ssm describe-instance-information \
+            --filters "Key=InstanceIds,Values=${INSTANCE_ID}" \
+            --query "InstanceInformationList[0].InstanceId" \
+            --output text | grep -q "${INSTANCE_ID}"
 
           CMD_ID=$(aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
+            --instance-ids "${INSTANCE_ID}" \
             --document-name "AWS-RunShellScript" \
             --comment "Deploy backend" \
-            --parameters commands="cd $WORKDIR && chmod +x scripts/ci-deploy.sh && ./scripts/ci-deploy.sh backend && docker compose ps" \
+            --parameters commands="cd ${WORKDIR} && chmod +x scripts/ci-deploy.sh && ./scripts/ci-deploy.sh backend && docker compose ps" \
             --query "Command.CommandId" \
             --output text)
 
-          echo "command_id=$CMD_ID" >> $GITHUB_OUTPUT
-          echo "SSM CommandId: $CMD_ID"
-
-      - name: Wait + print output
-        run: |
-          INSTANCE_ID="${{ secrets.EC2_INSTANCE_ID }}"
-          CMD_ID="${{ steps.send.outputs.command_id }}"
-
-          if [ -z "$CMD_ID" ] || [ "$CMD_ID" = "None" ]; then
+          if [ -z "${CMD_ID}" ] || [ "${CMD_ID}" = "None" ]; then
             echo "ERROR: No command id returned from send-command"
             exit 1
           fi
 
+          echo "command_id=${CMD_ID}" >> "$GITHUB_OUTPUT"
+          echo "SSM CommandId: ${CMD_ID}"
+
+      - name: Wait + print output
+        run: |
+          set -euo pipefail
+
+          INSTANCE_ID="${{ secrets.EC2_INSTANCE_ID }}"
+          CMD_ID="${{ steps.send.outputs.command_id }}"
+
           echo "Waiting for SSM command to finish..."
-          for i in $(seq 1 30); do
+          STATUS="Pending"
+
+          for i in $(seq 1 36); do
             STATUS=$(aws ssm get-command-invocation \
-              --command-id "$CMD_ID" \
-              --instance-id "$INSTANCE_ID" \
+              --command-id "${CMD_ID}" \
+              --instance-id "${INSTANCE_ID}" \
               --query "Status" \
               --output text 2>/dev/null || echo "Pending")
 
-            echo "Status: $STATUS"
+            echo "Status: ${STATUS}"
 
-            if [ "$STATUS" = "Success" ] || [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
-              break
-            fi
-            sleep 5
+            case "${STATUS}" in
+              Success|Failed|Cancelled|TimedOut)
+                break
+                ;;
+              *)
+                sleep 5
+                ;;
+            esac
           done
 
           echo ""
           echo "===== STDOUT ====="
           aws ssm get-command-invocation \
-            --command-id "$CMD_ID" \
-            --instance-id "$INSTANCE_ID" \
+            --command-id "${CMD_ID}" \
+            --instance-id "${INSTANCE_ID}" \
             --query "StandardOutputContent" \
             --output text || true
 
           echo ""
           echo "===== STDERR ====="
           aws ssm get-command-invocation \
-            --command-id "$CMD_ID" \
-            --instance-id "$INSTANCE_ID" \
+            --command-id "${CMD_ID}" \
+            --instance-id "${INSTANCE_ID}" \
             --query "StandardErrorContent" \
             --output text || true
 
-          FINAL_STATUS=$(aws ssm get-command-invocation \
-            --command-id "$CMD_ID" \
-            --instance-id "$INSTANCE_ID" \
-            --query "Status" \
-            --output text)
-
-          if [ "$FINAL_STATUS" != "Success" ]; then
-            echo "ERROR: Deploy failed with status: $FINAL_STATUS"
+          if [ "${STATUS}" != "Success" ]; then
+            echo "ERROR: Deploy failed with status: ${STATUS}"
             exit 1
           fi
