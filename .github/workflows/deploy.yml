@@ -1,121 +1,62 @@
-name: Deploy Backend to EC2
+name: Deploy Backend to EC2 via SSM
 
 on:
   push:
     branches: [main, master]
-    paths:
-      - '**'
   workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    name: Deploy Backend
 
     steps:
-      - name: Setup SSH
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Send deploy command (backend)
+        id: send
         run: |
-          mkdir -p ~/.ssh
+          INSTANCE_ID="${{ secrets.EC2_INSTANCE_ID }}"
+          WORKDIR="${{ secrets.SSM_WORKING_DIR }}"
+          if [ -z "$WORKDIR" ]; then WORKDIR="/opt/promora"; fi
 
-          cat > ~/.ssh/deploy_key << 'KEY'
-          ${{ secrets.EC2_SSH_KEY }}
-          KEY
-          chmod 600 ~/.ssh/deploy_key
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Deploy backend" \
+            --parameters commands="cd $WORKDIR && chmod +x scripts/ci-deploy.sh && ./scripts/ci-deploy.sh backend && docker compose ps" \
+            --query "Command.CommandId" \
+            --output text)
 
-          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+          echo "command_id=$CMD_ID" >> $GITHUB_OUTPUT
+          echo "SSM CommandId: $CMD_ID"
 
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Create deployment script
+      - name: Wait + print output
         run: |
-          cat > /tmp/ci-deploy.sh << 'EOF'
-          #!/bin/bash
-          set -e
-          set +e
-          cd /opt/promora
-          SERVICE="${1:-all}"
-          echo "Deploying service: $SERVICE"
-          echo ""
+          INSTANCE_ID="${{ secrets.EC2_INSTANCE_ID }}"
+          CMD_ID="${{ steps.send.outputs.command_id }}"
 
-          echo "Checking for code updates..."
-          if [ "$SERVICE" = "frontend" ] || [ "$SERVICE" = "all" ]; then
-            if [ -d "Frontend/.git" ]; then
-              cd Frontend && git pull origin main 2>/dev/null || git pull origin master 2>/dev/null || true
-              cd ..
-            else
-              echo "Frontend is not a git repository - rebuilding from existing files"
+          # wait (max ~2 min)
+          for i in $(seq 1 24); do
+            STATUS=$(aws ssm list-command-invocations \
+              --command-id "$CMD_ID" \
+              --details \
+              --query "CommandInvocations[0].Status" \
+              --output text)
+
+            echo "Status: $STATUS"
+            if [ "$STATUS" = "Success" ] || [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
+              break
             fi
-          fi
+            sleep 5
+          done
 
-          if [ "$SERVICE" = "backend" ] || [ "$SERVICE" = "all" ]; then
-            if [ -d "Backend/.git" ]; then
-              cd Backend && git pull origin main 2>/dev/null || git pull origin master 2>/dev/null || true
-              cd ..
-            else
-              echo "Backend is not a git repository - rebuilding from existing files"
-            fi
-          fi
-
-          if [ "$SERVICE" = "mcp" ] || [ "$SERVICE" = "all" ]; then
-            if [ -d "MCP-Servers/.git" ]; then
-              cd MCP-Servers && git pull origin main 2>/dev/null || git pull origin master 2>/dev/null || true
-              cd ..
-            else
-              echo "MCP-Servers is not a git repository - rebuilding from existing files"
-            fi
-          fi
-
-          set -e
-          echo ""
-          echo "Fetching environment from AWS SSM..."
-          export AWS_REGION=us-east-2
-          export SSM_PREFIX=/
-          source scripts/fetch-env-from-ssm.sh
-
-          echo ""
-          echo "Deploying containers..."
-          if [ "$SERVICE" = "backend" ]; then
-            docker compose rm -f backend 2>/dev/null || true
-            docker compose build --no-cache backend
-            docker compose up -d backend
-          elif [ "$SERVICE" = "frontend" ]; then
-            docker compose up -d --build frontend
-          elif [ "$SERVICE" = "mcp" ]; then
-            docker compose up -d --build mcp-server-a mcp-server-b mcp-server-c
-          else
-            docker compose up -d --build
-          fi
-
-          echo ""
-          echo "Deployment complete!"
-          docker compose ps
-          EOF
-
-      - name: Deploy to EC2
-        run: |
-          EC2_USER="${{ secrets.EC2_USER }}"
-          EC2_HOST="${{ secrets.EC2_HOST }}"
-
-          # Copy deployment script to EC2
-          scp -i ~/.ssh/deploy_key \
-              -o IdentitiesOnly=yes \
-              -o StrictHostKeyChecking=no \
-              /tmp/ci-deploy.sh ${EC2_USER}@${EC2_HOST}:/opt/promora/scripts/ci-deploy.sh
-
-          # Copy docker-compose.yml to EC2
-          scp -i ~/.ssh/deploy_key \
-              -o IdentitiesOnly=yes \
-              -o StrictHostKeyChecking=no \
-              docker-compose.yml ${EC2_USER}@${EC2_HOST}:/opt/promora/
-
-          # Run deployment
-          ssh -i ~/.ssh/deploy_key \
-              -o IdentitiesOnly=yes \
-              -o StrictHostKeyChecking=no \
-              -o BatchMode=yes \
-              ${EC2_USER}@${EC2_HOST} << 'EOF'
-            cd /opt/promora
-            chmod +x scripts/ci-deploy.sh
-            ./scripts/ci-deploy.sh backend
-          EOF
+          aws ssm list-command-invocations \
+            --command-id "$CMD_ID" \
+            --details \
+            --query "CommandInvocations[0].CommandPlugins[0].Output" \
+            --output text
