@@ -40,7 +40,6 @@ jobs:
           INSTANCE_ID="${{ secrets.EC2_INSTANCE_ID }}"
           CMD_ID="${{ steps.send.outputs.command_id }}"
 
-          # wait (max ~2 min)
           for i in $(seq 1 24); do
             STATUS=$(aws ssm list-command-invocations \
               --command-id "$CMD_ID" \
