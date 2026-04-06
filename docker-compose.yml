@@ -56,6 +56,9 @@ services:
       # MCP Servers Path (for stdio communication - will need adjustment)
       - MCP_SERVERS_PATH=/app/mcp-servers
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
     networks:
       - promora-network
     healthcheck:
@@ -88,6 +91,9 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
     networks:
       - promora-network
     healthcheck:
@@ -119,6 +125,9 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
     networks:
       - promora-network
     # Note: MCP servers use stdio, so they need to be accessed via docker exec
@@ -135,6 +144,9 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
     networks:
       - promora-network
 
@@ -147,6 +159,9 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
     networks:
       - promora-network
 
