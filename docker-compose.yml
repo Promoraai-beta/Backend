@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Backend API Service
   backend:
@@ -36,8 +34,7 @@ services:
       - FROM_EMAIL=${FROM_EMAIL}
       - FROM_NAME=${FROM_NAME:-Promora Assessment Platform}
       - FRONTEND_URL=${FRONTEND_URL}
-      - SENDGRID_API_KEY=${SENDGRID_API_KEY}
-      # Optional: SMTP (if not using SendGrid)
+      
       - SMTP_HOST=${SMTP_HOST}
       - SMTP_PORT=${SMTP_PORT}
       - SMTP_SECURE=${SMTP_SECURE}
