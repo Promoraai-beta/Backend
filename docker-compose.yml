@@ -17,6 +17,7 @@ services:
       # Note: uploads directory created inside container, no mount needed for testing
       # - ./uploads:/app/uploads
     environment:
+      - DOCKER_HOST=tcp://docker-proxy:2375
       - NODE_ENV=production
       - PORT=5001
       - MCP_USE_DOCKER=true
@@ -96,6 +97,18 @@ services:
       retries: 3
       start_period: 40s
 
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy
+    container_name: docker-proxy
+    environment:
+      - CONTAINERS=1
+      - EXEC=1
+      - POST=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+    networks:
+      - promora-network
   # MCP Server A: Job Analysis
   mcp-server-a:
     build:
@@ -140,7 +153,3 @@ services:
 networks:
   promora-network:
     driver: bridge
-
-volumes:
-  uploads:
-    driver: local
