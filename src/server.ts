@@ -11,6 +11,7 @@ import { securityHeaders, enforceTimer } from './middleware/security';
 import { apiLimiter, executeLimiter, codeSaveLimiter, videoUploadLimiter, aiInteractionLimiter, liveMonitoringLimiter, authLimiter, sessionCodeLimiter } from './middleware/rate-limiter';
 import { validateCodeExecution, validateSubmission, validateCodeSave } from './middleware/validation';
 import { startInactivityMonitor } from './services/inactivity-monitor';
+import { authenticate } from './middleware/rbac';
 import { logger } from './lib/logger';
 
 dotenv.config();
@@ -27,7 +28,7 @@ app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
-    
+
     const allowedOrigins = [
       'http://localhost:3000',
       'http://localhost:3001',
@@ -36,20 +37,24 @@ app.use(cors({
       'http://127.0.0.1:3001',
       'http://127.0.0.1:3002'
     ];
-    
+
     if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
       callback(null, true);
     } else {
-      callback(null, true); // In development, allow all origins
+      if (process.env.NODE_ENV === 'development') {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS: Origin ${origin} not allowed`));
+      }
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: [
-    'Content-Type', 
-    'Authorization', 
-    'X-Requested-With', 
-    'Access-Control-Allow-Origin', 
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'Access-Control-Allow-Origin',
     'Access-Control-Allow-Headers',
     'Access-Control-Allow-Methods',
     'X-Idempotency-Key'
@@ -95,8 +100,8 @@ const LANGUAGE_IDS: Record<string, number> = {
 
 // Routes
 app.get('/', (req, res) => {
-  res.json({ 
-    status: 'ok', 
+  res.json({
+    status: 'ok',
     message: 'Promora Backend API',
     version: '1.0.0',
     endpoints: {
@@ -118,14 +123,14 @@ app.use('/api', apiRoutes);
 // Debounce map to prevent too frequent saves
 const codeSaveDebounce = new Map<string, NodeJS.Timeout>();
 
-app.post('/api/code-save', codeSaveLimiter, validateCodeSave, async (req: Request, res: Response) => {
+app.post('/api/code-save', authenticate, codeSaveLimiter, validateCodeSave, async (req: Request, res: Response) => {
   try {
     const { session_id, code, language } = req.body;
 
     // Debounce: Only save if last save was more than 2 seconds ago
     const debounceKey = session_id;
     const existingTimeout = codeSaveDebounce.get(debounceKey);
-    
+
     if (existingTimeout) {
       clearTimeout(existingTimeout);
     }
@@ -137,7 +142,7 @@ app.post('/api/code-save', codeSaveLimiter, validateCodeSave, async (req: Reques
 
         // Limit code size to prevent DB bloat
         const maxCodeSize = 1000000; // 1MB
-        const codeToSave = code.length > maxCodeSize 
+        const codeToSave = code.length > maxCodeSize
           ? code.substring(0, maxCodeSize) + '\n// ... [code truncated due to size]'
           : code;
 
@@ -149,7 +154,7 @@ app.post('/api/code-save', codeSaveLimiter, validateCodeSave, async (req: Reques
             language
           }
         });
-        
+
         codeSaveDebounce.delete(debounceKey);
       } catch (error) {
         logger.error('Debounced code save error:', error);
@@ -160,8 +165,8 @@ app.post('/api/code-save', codeSaveLimiter, validateCodeSave, async (req: Reques
     codeSaveDebounce.set(debounceKey, timeout);
 
     // Return immediately (don't wait for debounced save)
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: 'Code save queued',
       data: { sessionId: session_id, queued: true }
     });
@@ -170,7 +175,7 @@ app.post('/api/code-save', codeSaveLimiter, validateCodeSave, async (req: Reques
   }
 });
 
-app.get('/api/code-save', async (req: Request, res: Response) => {
+app.get('/api/code-save', authenticate, async (req: Request, res: Response) => {
   try {
     const session_id = req.query.session_id as string;
 
@@ -198,7 +203,7 @@ async function executeJavaScript(code: string, timeoutMs: number = 5000): Promis
   let output = '';
   let errorOutput = '';
   let timedOut = false;
-  
+
   // Security: Block dangerous operations
   const dangerousPatterns = [
     /require\s*\(/g,
@@ -239,7 +244,7 @@ async function executeJavaScript(code: string, timeoutMs: number = 5000): Promis
       error: 'Code is too large (max 100KB)'
     };
   }
-  
+
   // Capture console.log
   const originalLog = console.log;
   console.log = (...args: any[]) => {
@@ -253,18 +258,18 @@ async function executeJavaScript(code: string, timeoutMs: number = 5000): Promis
       }
       return String(arg);
     }).join(' ') + '\n';
-    
+
     // Limit output size
     if (output.length > 100000) { // 100KB output limit
       output = output.substring(0, 100000) + '\n...[output truncated]';
     }
   };
-  
+
   // Capture console.error
   const originalError = console.error;
   console.error = (...args: any[]) => {
     errorOutput += args.map(arg => String(arg)).join(' ') + '\n';
-    
+
     // Limit error output size
     if (errorOutput.length > 10000) { // 10KB error limit
       errorOutput = errorOutput.substring(0, 10000) + '\n...[error output truncated]';
@@ -274,7 +279,7 @@ async function executeJavaScript(code: string, timeoutMs: number = 5000): Promis
   try {
     // Execute code with timeout
     const startTime = Date.now();
-    
+
     // Create a promise that rejects after timeout
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => {
@@ -313,7 +318,7 @@ async function executeJavaScript(code: string, timeoutMs: number = 5000): Promis
     // Build response
     const finalOutput = output.trim();
     const finalError = errorOutput.trim();
-    
+
     if (finalError) {
       return { success: false, error: finalError, output: finalOutput || undefined };
     } else if (finalOutput) {
@@ -324,14 +329,14 @@ async function executeJavaScript(code: string, timeoutMs: number = 5000): Promis
   } catch (err: any) {
     console.log = originalLog;
     console.error = originalError;
-    
+
     if (timedOut) {
       return {
         success: false,
         error: `Execution timeout (${timeoutMs}ms)`
       };
     }
-    
+
     return {
       success: false,
       error: err.message || err.toString(),
@@ -343,7 +348,7 @@ async function executeJavaScript(code: string, timeoutMs: number = 5000): Promis
 // Helper function to execute code using Judge0
 async function executeWithJudge0(code: string, language: string, stdin: string = '') {
   const languageId = LANGUAGE_IDS[language.toLowerCase()];
-  
+
   if (!languageId) {
     return { success: false, error: `Language ${language} not supported` };
   }
@@ -414,7 +419,7 @@ async function executeWithJudge0(code: string, language: string, stdin: string =
 }
 
 // Helper function to run test cases (for JavaScript)
-function runTestCases(code: string, testCases: Array<{name: string, input: any[], expected: any, visible?: boolean}>, fnName: string) {
+function runTestCases(code: string, testCases: Array<{ name: string, input: any[], expected: any, visible?: boolean }>, fnName: string) {
   try {
     // Create an isolated context for code execution
     const context: any = {};
@@ -423,10 +428,10 @@ function runTestCases(code: string, testCases: Array<{name: string, input: any[]
       // Store function in context
       context.${fnName} = ${fnName};
     `);
-    
+
     // Execute code in context
     func(context);
-    
+
     const __fn = context[fnName];
     if (!__fn || typeof __fn !== 'function') {
       throw new Error(`Function ${fnName} not found or not callable`);
@@ -438,7 +443,7 @@ function runTestCases(code: string, testCases: Array<{name: string, input: any[]
         const actual = __fn.apply(null, tc.input);
         const passed = JSON.stringify(actual) === JSON.stringify(tc.expected);
         const isVisible = tc.visible !== false; // Default to visible if not specified
-        
+
         // For hidden tests, don't include expected/actual details
         if (isVisible) {
           results.push({
@@ -465,7 +470,7 @@ function runTestCases(code: string, testCases: Array<{name: string, input: any[]
         });
       }
     }
-    
+
     return results;
   } catch (err: any) {
     return [{
@@ -486,14 +491,14 @@ app.post('/api/submit', enforceTimer, validateSubmission, async (req: Request, r
     const session = await prisma.session.findUnique({
       where: { id: sessionId }
     });
-    
+
     if (session?.status === 'submitted') {
       // Return existing submission if already submitted
       const existingSubmission = await prisma.submission.findFirst({
         where: { sessionId },
         orderBy: { submittedAt: 'desc' }
       });
-      
+
       if (existingSubmission) {
         return res.json({
           success: true,
@@ -503,7 +508,7 @@ app.post('/api/submit', enforceTimer, validateSubmission, async (req: Request, r
             score: existingSubmission.score,
             passed: existingSubmission.passedTests,
             total: existingSubmission.totalTests,
-            passedVisible: (existingSubmission.testResults as any)?.filter((t: any) => 
+            passedVisible: (existingSubmission.testResults as any)?.filter((t: any) =>
               testCases.find((tc: any) => tc.name === t.name && tc.visible) && t.passed
             )?.length || 0,
             totalVisible: testCases.filter((tc: any) => tc.visible).length
@@ -525,9 +530,9 @@ app.post('/api/submit', enforceTimer, validateSubmission, async (req: Request, r
         if (!fnMatch) {
           throw new Error('Could not detect function name. Please define a named function.');
         }
-        
+
         const fnName = fnMatch[1];
-        
+
         // Run all test cases (visible + hidden) with secure execution
         allTestResults = runTestCases(code, testCases, fnName);
       } else {
@@ -584,7 +589,7 @@ app.post('/api/submit', enforceTimer, validateSubmission, async (req: Request, r
         score: result.score,
         passed: result.passed,
         total: result.total,
-        passedVisible: result.allTestResults.filter((t: any) => 
+        passedVisible: result.allTestResults.filter((t: any) =>
           testCases.find((tc: any) => tc.name === t.name && tc.visible) && t.passed
         ).length,
         totalVisible: testCases.filter((tc: any) => tc.visible).length
@@ -592,15 +597,15 @@ app.post('/api/submit', enforceTimer, validateSubmission, async (req: Request, r
     });
   } catch (error: any) {
     logger.error('Submission error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to submit code' 
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to submit code'
     });
   }
 });
 
 // Code execution API
-app.post('/api/execute', executeLimiter, validateCodeExecution, async (req: Request, res: Response) => {
+app.post('/api/execute', authenticate, executeLimiter, validateCodeExecution, async (req: Request, res: Response) => {
   try {
     const { code, language, stdin } = req.body;
 
@@ -611,12 +616,12 @@ app.post('/api/execute', executeLimiter, validateCodeExecution, async (req: Requ
     } else {
       // For other languages, use Judge0 (already sandboxed)
       if (!JUDGE0_API_KEY) {
-        res.json({ 
-          success: true, 
-          result: { 
-            success: false, 
-            error: 'Judge0 API key not configured. Please add JUDGE0_API_KEY to .env' 
-          } 
+        res.json({
+          success: true,
+          result: {
+            success: false,
+            error: 'Judge0 API key not configured. Please add JUDGE0_API_KEY to .env'
+          }
         });
       } else {
         const result = await executeWithJudge0(code, language, stdin || '');
@@ -635,7 +640,7 @@ videoStreamServer.initialize(server);
 server.listen(PORT, () => {
   logger.log(`🚀 Backend server running on http://localhost:${PORT}`);
   logger.log(`📡 WebSocket server initialized on ws://localhost:${PORT}/ws/video`);
-  
+
   // Start inactivity monitoring service
   startInactivityMonitor();
 });
