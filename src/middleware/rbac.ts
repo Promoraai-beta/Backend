@@ -3,7 +3,8 @@ import * as jwt from 'jsonwebtoken';
 import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) throw new Error('FATAL: JWT_SECRET is not set');
 
 // Extend Request type to include user info
 declare global {
@@ -111,8 +112,8 @@ export const checkSessionOwnership = async (req: Request, res: Response, next: N
       }
 
       // Check 1: Session was created by this recruiter (via recruiterEmail)
-      if (session.recruiterEmail && recruiterProfile.user?.email && 
-          session.recruiterEmail.toLowerCase() === recruiterProfile.user.email.toLowerCase()) {
+      if (session.recruiterEmail && recruiterProfile.user?.email &&
+        session.recruiterEmail.toLowerCase() === recruiterProfile.user.email.toLowerCase()) {
         logger.log(`[Session Access] Recruiter ${req.userId} granted access via recruiterEmail match`);
         return next();
       }
@@ -124,8 +125,8 @@ export const checkSessionOwnership = async (req: Request, res: Response, next: N
       }
 
       // Check 3: Recruiter's company owns the assessment
-      if (session.assessment?.companyId && recruiterProfile.companyId && 
-          session.assessment.companyId === recruiterProfile.companyId) {
+      if (session.assessment?.companyId && recruiterProfile.companyId &&
+        session.assessment.companyId === recruiterProfile.companyId) {
         logger.log(`[Session Access] Recruiter ${req.userId} granted access via company ownership`);
         return next();
       }
