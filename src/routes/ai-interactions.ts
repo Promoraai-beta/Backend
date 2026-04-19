@@ -2,11 +2,12 @@ import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { aiInteractionLimiter } from '../middleware/rate-limiter';
 import { validateAIIntraction } from '../middleware/validation';
+import { authenticate } from '../middleware/rbac';
 
 const router = Router();
 
 // Track AI interaction
-router.post('/', aiInteractionLimiter, validateAIIntraction, async (req: Request, res: Response) => {
+router.post('/', authenticate, aiInteractionLimiter, validateAIIntraction, async (req: Request, res: Response) => {
   try {
     const { sessionId, eventType, model, promptText, responseText, tokensUsed, codeSnippet, codeLineNumber, codeBefore, codeAfter, metadata } = req.body;
 
@@ -37,7 +38,7 @@ router.post('/', aiInteractionLimiter, validateAIIntraction, async (req: Request
 });
 
 // Get AI interactions for a session
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', authenticate, async (req: Request, res: Response) => {
   try {
     const sessionId = req.query.session_id as string;
     if (!sessionId) {
@@ -56,4 +57,3 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 export default router;
-
