@@ -35,7 +35,9 @@ app.use(cors({
       'http://localhost:3002',
       'http://127.0.0.1:3000',
       'http://127.0.0.1:3001',
-      'http://127.0.0.1:3002'
+      'http://127.0.0.1:3002',
+      process.env.CORS_ORIGIN,
+      process.env.FRONTEND_URL,
     ];
 
     if (allowedOrigins.includes(origin) || process.env.NODE_ENV === 'development') {
