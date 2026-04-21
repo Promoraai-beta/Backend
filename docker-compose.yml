@@ -9,7 +9,6 @@ services:
       - "5001:5001"
     volumes:
       # Mount Docker socket to allow backend to exec into MCP containers
-      - /var/run/docker.sock:/var/run/docker.sock
       # Note: MCP servers are in separate containers, accessed via Docker exec
       # No need to mount MCP-Servers directory
       # Note: uploads directory created inside container, no mount needed for testing
@@ -154,6 +153,7 @@ services:
       dockerfile: Dockerfile.server-c
     container_name: promora-mcp-server-c
     environment:
+      - BACKEND_URL=${BACKEND_URL}
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
     security_opt:

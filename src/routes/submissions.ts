@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma';
+import { authenticate, requireRole } from '../middleware/rbac';
 
 const router = Router();
 
 // Get all submissions (optionally filtered by session_id)
-router.get('/', async (req, res) => {
+router.get('/', authenticate, requireRole(['recruiter', 'admin']), async (req, res) => {
   try {
     const { session_id } = req.query;
 
@@ -24,7 +25,7 @@ router.get('/', async (req, res) => {
 });
 
 // Get submission by ID
-router.get('/:id', async (req, res) => {
+router.get('/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -43,4 +44,3 @@ router.get('/:id', async (req, res) => {
 });
 
 export default router;
-

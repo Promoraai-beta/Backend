@@ -38,14 +38,10 @@ app.use(cors({
       'http://127.0.0.1:3002'
     ];
 
-    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
+    if (allowedOrigins.includes(origin) || process.env.NODE_ENV === 'development') {
       callback(null, true);
     } else {
-      if (process.env.NODE_ENV === 'development') {
-        callback(null, true);
-      } else {
-        callback(new Error(`CORS: Origin ${origin} not allowed`));
-      }
+      callback(new Error(`CORS: Origin ${origin} not allowed`));
     }
   },
   credentials: true,

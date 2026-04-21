@@ -130,13 +130,6 @@ export const checkSessionOwnership = async (req: Request, res: Response, next: N
         logger.log(`[Session Access] Recruiter ${req.userId} granted access via company ownership`);
         return next();
       }
-
-      // If assessment type is recruiter and no explicit ownership, still allow if recruiter is authenticated
-      // This handles cases where sessions are created for recruiter assessments but company linkage isn't perfect
-      if (session.assessment?.assessmentType === 'recruiter' && recruiterProfile) {
-        logger.log(`[Session Access] Recruiter ${req.userId} granted access to recruiter assessment`);
-        return next();
-      }
     }
 
     // Admin can access any session

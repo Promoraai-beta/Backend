@@ -10,54 +10,10 @@ import { getFrontendUrl } from '../lib/frontend-url';
 
 const router = Router();
 
-// JWT_SECRET must be set in environment variables for security
-// In production, this should never have a fallback value
+// Single source of truth for JWT_SECRET — same as rbac.ts
+// Will throw at startup if not set (handled by rbac.ts module load)
 const JWT_SECRET = process.env.JWT_SECRET;
-
-// Cache the secret and warning flag to avoid repeated warnings
-let cachedSecret: string | null = null;
-let warningLogged = false;
-
-// Type guard: ensure JWT_SECRET is defined for TypeScript
-// In development, use a fallback only if not set (for local testing)
-const getJwtSecret = (): string => {
-  // Return cached secret if available
-  if (cachedSecret !== null) {
-    return cachedSecret;
-  }
-
-  if (!JWT_SECRET) {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('JWT_SECRET is required in production. Please set it in environment variables.');
-    }
-    
-    // Development fallback (should be set in .env but allow local testing)
-    // Only log warning once to avoid spam
-    if (!warningLogged) {
-      logger.warn('⚠️ WARNING: JWT_SECRET not set, using development fallback. Set JWT_SECRET in .env for production!');
-      warningLogged = true;
-    }
-    cachedSecret = 'development-secret-key-change-in-production';
-    return cachedSecret;
-  }
-
-  cachedSecret = JWT_SECRET;
-  return cachedSecret;
-};
-
-// Log warning/error only once at module load (not on every request)
-if (!JWT_SECRET) {
-  if (process.env.NODE_ENV === 'production') {
-    logger.error('❌ CRITICAL: JWT_SECRET environment variable is not set!');
-    logger.error('   Please set JWT_SECRET in your .env file.');
-    logger.error('   Authentication will not work without this secret.');
-    // Don't throw here - let getJwtSecret handle it to avoid startup failure
-    // The function will throw when called, which is more graceful
-  } else {
-    // In development, just warn once (getJwtSecret will handle the actual warning)
-    // This prevents duplicate warnings
-  }
-}
+if (!JWT_SECRET) throw new Error('FATAL: JWT_SECRET is not set');
 
 // Register new user (CANDIDATES ONLY - recruiters must use invitation links)
 router.post('/register', authLimiter, validateEmail, validatePassword, handleValidationErrors, async (req: Request, res: Response) => {
@@ -118,7 +74,7 @@ router.post('/register', authLimiter, validateEmail, validatePassword, handleVal
     // Generate JWT token
     const token = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
-      getJwtSecret(),
+      JWT_SECRET,
       { expiresIn: '7d' }
     );
 
@@ -188,7 +144,7 @@ router.post('/login', authLimiter, validateEmail, handleValidationErrors, async 
     // Generate JWT token
     const token = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
-      getJwtSecret(),
+      JWT_SECRET,
       { expiresIn: '7d' }
     );
 
@@ -229,7 +185,7 @@ router.get('/me', async (req: Request, res: Response) => {
     }
 
     // Verify token
-    const decoded = jwt.verify(token, getJwtSecret()) as any;
+    const decoded = jwt.verify(token, JWT_SECRET) as any;
 
     // Get user with profile
     const user = await prisma.user.findUnique({
@@ -497,4 +453,3 @@ router.post('/reset-password', authLimiter, validatePassword, handleValidationEr
 });
 
 export default router;
-
