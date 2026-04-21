@@ -2,7 +2,7 @@ services:
   # Backend API Service
   backend:
     build:
-      context: ./Backend
+      context: .
       dockerfile: Dockerfile
     container_name: promora-backend
     ports:
@@ -67,7 +67,7 @@ services:
   # Frontend Next.js Service
   frontend:
     build:
-      context: ./Frontend
+      context: ../Frontend
       dockerfile: Dockerfile
       args:
         - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:5001}
@@ -114,7 +114,7 @@ services:
   # MCP Server A: Job Analysis
   mcp-server-a:
     build:
-      context: ./MCP-Servers
+      context: ../MCP-Servers
       dockerfile: Dockerfile.server-a
     container_name: promora-mcp-server-a
     environment:
@@ -133,7 +133,7 @@ services:
   # MCP Server B: Template Builder
   mcp-server-b:
     build:
-      context: ./MCP-Servers
+      context: ../MCP-Servers
       dockerfile: Dockerfile.server-b
     container_name: promora-mcp-server-b
     environment:
@@ -149,7 +149,7 @@ services:
   # MCP Server C: Monitoring
   mcp-server-c:
     build:
-      context: ./MCP-Servers
+      context: ../MCP-Servers
       dockerfile: Dockerfile.server-c
     container_name: promora-mcp-server-c
     environment:
