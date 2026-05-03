@@ -1,8 +1,5 @@
-// Prisma Schema for Promora Assessment Platform
-// This file defines the database models
-
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["native", "linux-musl-openssl-3.0.x", "linux-musl-arm64-openssl-3.0.x"]
 }
 
@@ -11,118 +8,108 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// User model - base authentication
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String // Hashed password
-  name      String
-  role      String // "candidate" | "recruiter" | "admin"
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  candidateProfile CandidateProfile?
-  recruiterProfile RecruiterProfile?
-  sessions         Session[] // Sessions where user is candidate
-  passwordResetCodes PasswordResetCode[] // Password reset codes
+  id                 String              @id @default(uuid())
+  email              String              @unique
+  password           String
+  name               String
+  role               String
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+  candidateProfile   CandidateProfile?
+  passwordResetCodes PasswordResetCode[]
+  recruiterProfile   RecruiterProfile?
+  sessions           Session[]
 
   @@map("users")
 }
 
-// Candidate Profile
 model CandidateProfile {
   id                   String   @id @default(uuid())
   userId               String   @unique @map("user_id")
-  title                String? // Job title
+  title                String?
   location             String?
-  bio                  String?  @db.Text
-  avatar               String? // URL to avatar image
-  skills               Json?    @db.JsonB // Array of skills
-  interests            Json?    @db.JsonB // Array of interests/testing preferences
+  bio                  String?
+  avatar               String?
+  skills               Json?
+  interests            Json?
   targetRole           String?  @map("target_role")
   promptIQScore        Int      @default(0) @map("prompt_iq_score")
   totalPoints          Int      @default(0) @map("total_points")
-  level                String?  @default("Beginner") // Beginner, Intermediate, Advanced, Expert
+  level                String?  @default("Beginner")
   assessmentsCompleted Int      @default(0) @map("assessments_completed")
-  achievements         Json?    @db.JsonB // Array of achievements
+  achievements         Json?
   isPublic             Boolean  @default(false) @map("is_public")
   joinedDate           DateTime @default(now()) @map("joined_date")
   onboardingCompleted  Boolean  @default(false) @map("onboarding_completed")
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("candidate_profiles")
 }
 
-// Recruiter Profile
 model RecruiterProfile {
   id                  String   @id @default(uuid())
   userId              String   @unique @map("user_id")
   companyId           String?  @map("company_id")
-  position            String? // Job position/title
+  position            String?
   department          String?
-  avatar              String? // URL to avatar image
+  avatar              String?
   onboardingCompleted Boolean  @default(false) @map("onboarding_completed")
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
-
-  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  company             Company? @relation(fields: [companyId], references: [id])
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("recruiter_profiles")
 }
 
-// Company model
 model Company {
-  id          String   @id @default(uuid())
+  id          String             @id @default(uuid())
   name        String
   industry    String?
-  size        String? // e.g., "500-1000 employees"
+  size        String?
   location    String?
   website     String?
-  description String?  @db.Text
-  logo        String? // URL to logo image
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-
+  description String?
+  logo        String?
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+  assessments Assessment[]
+  invitations Invitation[]
   recruiters  RecruiterProfile[]
-  assessments Assessment[] // Assessments created by company
-  invitations Invitation[] // Invitations for this company
 
   @@map("companies")
 }
 
-// Invitation model for recruiter signup
 model Invitation {
   id          String    @id @default(uuid())
-  token       String    @unique // Unique token for invitation link
-  email       String? // Optional: specific email invitation
+  token       String    @unique
+  email       String?
   companyId   String?   @map("company_id")
-  companyName String?   @map("company_name") // Company name if company doesn't exist yet
-  role        String    @default("recruiter") // Always recruiter for now
-  usedBy      String?   @map("used_by") // User ID who used the invitation
+  companyName String?   @map("company_name")
+  role        String    @default("recruiter")
+  usedBy      String?   @map("used_by")
   usedAt      DateTime? @map("used_at")
   expiresAt   DateTime? @map("expires_at")
   createdAt   DateTime  @default(now()) @map("created_at")
-  createdBy   String?   @map("created_by") // User ID of admin who created invitation
-  company     Company?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  createdBy   String?   @map("created_by")
+  company     Company?  @relation(fields: [companyId], references: [id])
 
   @@index([token])
   @@index([email])
   @@map("invitations")
 }
 
-// Password Reset model for forgot password flow
 model PasswordReset {
   id        String    @id @default(uuid())
   email     String
-  code      String    // 6-digit verification code
-  token     String    @unique // Token for password reset link
-  used      Boolean   @default(false) // Whether the reset has been used
+  code      String
+  token     String    @unique
+  used      Boolean   @default(false)
   usedAt    DateTime? @map("used_at")
-  expiresAt DateTime  @map("expires_at") // Code expires after 15 minutes
+  expiresAt DateTime  @map("expires_at")
   createdAt DateTime  @default(now()) @map("created_at")
 
   @@index([email])
@@ -132,25 +119,25 @@ model PasswordReset {
   @@map("password_resets")
 }
 
-// Reusable Template model - stores template specs that can be reused across assessments
 model Template {
-  id                   String   @id @default(uuid())
-  templateHash         String   @unique @map("template_hash") // Hash based on role/stack/level for quick lookup
+  id                   String       @id @default(uuid())
+  templateHash         String       @unique @map("template_hash")
   role                 String?
-  techStack            Json?    @map("tech_stack") @db.JsonB
+  techStack            Json?        @map("tech_stack")
   level                String?
-  templateSpec         Json     @map("template_spec") @db.JsonB // The complete template specification with fileStructure
-  suggestedAssessments Json?    @map("suggested_assessments") @db.JsonB // Pre-generated assessment tasks
-  dockerImage          String?  @map("docker_image") // Docker image name if built
-  dockerImageBuilt     Boolean  @default(false) @map("docker_image_built") // Whether Docker image has been built
-  webcontainerReady    Boolean  @default(false) @map("webcontainer_ready") // Whether WebContainer template is ready
-  buildStatus          String   @default("pending") @map("build_status") // 'pending', 'building', 'ready', 'failed'
-  buildError           String?  @map("build_error") @db.Text
-  usageCount           Int      @default(0) @map("usage_count") // How many assessments use this template
-  createdAt            DateTime @default(now()) @map("created_at")
-  updatedAt            DateTime @updatedAt @map("updated_at")
-
-  assessments Assessment[] // Assessments using this template
+  templateSpec         Json         @map("template_spec")
+  suggestedAssessments Json?        @map("suggested_assessments")
+  dockerImage          String?      @map("docker_image")
+  dockerImageBuilt     Boolean      @default(false) @map("docker_image_built")
+  webcontainerReady    Boolean      @default(false) @map("webcontainer_ready")
+  buildStatus          String       @default("pending") @map("build_status")
+  buildError           String?      @map("build_error")
+  usageCount           Int          @default(0) @map("usage_count")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
+  assessments          Assessment[]
+  assessmentVariants   AssessmentVariant[]
+  assignedSessions     Session[]          @relation("SessionAssignedVariant")
 
   @@index([templateHash])
   @@index([role, level])
@@ -159,26 +146,27 @@ model Template {
 }
 
 model Assessment {
-  id             String   @id @default(uuid())
-  jobTitle       String?  @map("job_title")
-  companyId      String?  @map("company_id")
-  jobDescription String?  @map("job_description") @db.Text
+  id             String    @id @default(uuid())
+  jobTitle       String?   @map("job_title")
+  companyId      String?   @map("company_id")
+  jobDescription String?   @map("job_description")
   role           String?
-  techStack      Json?    @map("tech_stack") @db.JsonB // Use JSONB instead of JSON for better performance
+  techStack      Json?     @map("tech_stack")
   level          String?
-  templateId     String?  @map("template_id") // Reference to reusable Template
-  template       Json?    @db.JsonB // Use JSONB instead of JSON for better performance (legacy - kept for backward compatibility)
-  sourceUrl      String?  @map("source_url")
-  sourceType     String?  @map("source_type") // 'url', 'manual', or 'self-assessment'
-  assessmentType String?  @default("recruiter") @map("assessment_type") // 'recruiter' or 'candidate' - distinguishes creation context
-  isActive       Boolean  @default(true) @map("is_active") // Whether the job/assessment is active (recruitment open)
-  createdBy      String?  @map("created_by") // User ID of creator (recruiter or candidate)
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
-
-  company     Company?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  templateRef Template? @relation(fields: [templateId], references: [id], onDelete: SetNull)
-  sessions    Session[]
+  templateId     String?   @map("template_id")
+  template       Json?
+  sourceUrl      String?   @map("source_url")
+  sourceType     String?   @map("source_type")
+  assessmentType String?            @default("recruiter") @map("assessment_type")
+  isActive       Boolean            @default(true) @map("is_active")
+  createdBy      String?            @map("created_by")
+  variantCount   Int?               @map("variant_count") // null = 1 (single-template mode)
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+  company        Company?           @relation(fields: [companyId], references: [id])
+  templateRef    Template?          @relation(fields: [templateId], references: [id])
+  sessions       Session[]
+  variants       AssessmentVariant[]
 
   @@index([level])
   @@index([role])
@@ -187,34 +175,61 @@ model Assessment {
   @@map("assessments")
 }
 
-model Session {
-  id               String    @id @default(uuid())
-  sessionCode      String    @unique @map("session_code") // Use session_code column (varchar)
-  candidateId      String?   @map("candidate_id") // User ID of candidate
-  candidateName    String?   @map("candidate_name")
-  candidateEmail   String?   @map("candidate_email")
-  recruiterEmail   String?   @map("recruiter_email")
-  assessmentId     String?   @map("assessment_id")
-  status           String    @default("pending") // pending, active, submitted, ended, completed
-  startedAt        DateTime? @map("started_at")
-  submittedAt      DateTime? @map("submitted_at")
-  timeLimit        Int       @default(3600) @map("time_limit") // seconds
-  selectedLlm      String?   @map("selected_llm")
-  finalCode        String?   @map("final_code") @db.Text
-  expiresAt        DateTime? @map("expires_at")
-  lastActivityAt   DateTime? @map("last_activity_at") // Track last activity for inactivity timeout
-  tabSwitchCount   Int       @default(0) @map("tab_switch_count") // Track number of tab switches
-  lastTabSwitchAt  DateTime? @map("last_tab_switch_at") // Track last tab switch timestamp
-  createdAt        DateTime  @default(now()) @map("created_at")
+// Stores the N template variants generated for an assessment.
+// variantIndex is 0-based. Session assignment = sessionCount % variantCount → variantIndex.
+model AssessmentVariant {
+  id           String     @id @default(uuid())
+  assessmentId String     @map("assessment_id")
+  templateId   String     @map("template_id")
+  variantIndex Int        @map("variant_index") // 0, 1, 2, ...
+  createdAt    DateTime   @default(now()) @map("created_at")
+  assessment   Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  template     Template   @relation(fields: [templateId], references: [id])
 
-  candidate      User?           @relation(fields: [candidateId], references: [id], onDelete: SetNull)
-  assessment     Assessment?     @relation(fields: [assessmentId], references: [id])
-  codeSnapshots  CodeSnapshot[]
-  events         Event[]
-  videoChunks    VideoChunk[]
-  submissions    Submission[]
-  aiInteractions AiInteraction[]
-  agentInsights  AgentInsight[]
+  @@unique([assessmentId, variantIndex])
+  @@index([assessmentId])
+  @@map("assessment_variants")
+}
+
+model Session {
+  id                    String          @id @default(uuid())
+  sessionCode           String          @unique @map("session_code")
+  candidateId           String?         @map("candidate_id")
+  candidateName         String?         @map("candidate_name")
+  candidateEmail        String?         @map("candidate_email")
+  recruiterEmail        String?         @map("recruiter_email")
+  assessmentId          String?         @map("assessment_id")
+  status                String          @default("pending")
+  startedAt             DateTime?       @map("started_at")
+  submittedAt           DateTime?       @map("submitted_at")
+  timeLimit             Int             @default(3600) @map("time_limit")
+  selectedLlm           String?         @map("selected_llm")
+  finalCode             String?         @map("final_code")
+  expiresAt             DateTime?       @map("expires_at")
+  lastActivityAt        DateTime?       @map("last_activity_at")
+  tabSwitchCount        Int             @default(0) @map("tab_switch_count")
+  lastTabSwitchAt       DateTime?       @map("last_tab_switch_at")
+  createdAt             DateTime        @default(now()) @map("created_at")
+  assignedVariantId     String?         @map("assigned_variant_id") // null = use assessment.templateRef
+  containerId           String?         @map("container_id")
+  containerUrl          String?         @map("container_url")
+  containerStatus       String?         @default("pending") @map("container_status") // pending | provisioning | ready | failed
+  figmaFileUrl          String?         @map("figma_file_url")
+  figmaResourceId       String?         @map("figma_resource_id")
+  sheetsFileUrl         String?         @map("sheets_file_url")
+  sheetsResourceId      String?         @map("sheets_resource_id")
+  previewUrl            String?         @map("preview_url")
+  supportsDirectPreview Boolean         @default(false) @map("supports_direct_preview")
+  toolResources         Json?           @map("tool_resources")
+  agentInsights         AgentInsight?
+  aiInteractions        AiInteraction[]
+  codeSnapshots         CodeSnapshot[]
+  events                Event[]
+  mcpInsights           McpInsight[]
+  assessment            Assessment?     @relation(fields: [assessmentId], references: [id])
+  candidate             User?           @relation(fields: [candidateId], references: [id])
+  assignedVariant       Template?       @relation("SessionAssignedVariant", fields: [assignedVariantId], references: [id])
+  submissions           Submission[]
 
   @@index([sessionCode])
   @@index([status])
@@ -227,7 +242,7 @@ model CodeSnapshot {
   id        String   @id @default(uuid())
   sessionId String   @map("session_id")
   timestamp DateTime @default(now())
-  code      String   @db.Text
+  code      String
   lineCount Int      @map("line_count")
   language  String
   createdAt DateTime @default(now()) @map("created_at")
@@ -242,7 +257,7 @@ model Event {
   sessionId String   @map("session_id")
   eventType String   @map("event_type")
   timestamp DateTime @default(now())
-  metadata  Json?    @db.JsonB
+  metadata  Json?
   createdAt DateTime @default(now()) @map("created_at")
   session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
@@ -251,29 +266,14 @@ model Event {
   @@map("events")
 }
 
-model VideoChunk {
-  id         String   @id @default(uuid())
-  sessionId  String   @map("session_id")
-  chunkIndex Int      @map("chunk_index")
-  streamType String   @default("screenshare") @map("stream_type") // 'webcam' | 'screenshare' | 'combined'
-  url        String
-  sizeBytes  BigInt   @map("size_bytes")
-  uploadedAt DateTime @default(now()) @map("uploaded_at")
-  createdAt  DateTime @default(now()) @map("created_at")
-  session    Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-
-  @@index([sessionId])
-  @@index([sessionId, streamType, chunkIndex])
-  @@map("video_chunks")
-}
 
 model Submission {
   id          String   @id @default(uuid())
   sessionId   String   @map("session_id")
   problemId   Int?     @map("problem_id")
-  code        String   @db.Text
+  code        String
   language    String
-  testResults Json?    @map("test_results") @db.JsonB
+  testResults Json?    @map("test_results")
   score       Int      @default(0)
   passedTests Int      @default(0) @map("passed_tests")
   totalTests  Int      @default(0) @map("total_tests")
@@ -287,21 +287,26 @@ model Submission {
 }
 
 model AiInteraction {
-  id             String   @id @default(uuid())
-  sessionId      String   @map("session_id")
-  eventType      String   @map("event_type")
-  timestamp      DateTime @default(now())
-  model          String?
-  promptText     String?  @map("prompt_text") @db.Text
-  responseText   String?  @map("response_text") @db.Text
-  tokensUsed     Int?     @map("tokens_used")
-  codeSnippet    String?  @map("code_snippet") @db.Text
-  codeLineNumber Int?     @map("code_line_number")
-  codeBefore     String?  @map("code_before") @db.Text
-  codeAfter      String?  @map("code_after") @db.Text
-  metadata       Json?    @db.JsonB
-  createdAt      DateTime @default(now()) @map("created_at")
-  session        Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  id               String   @id @default(uuid())
+  sessionId        String   @map("session_id")
+  eventType        String   @map("event_type")
+  timestamp        DateTime @default(now())
+  model            String?
+  promptText       String?  @map("prompt_text")
+  responseText     String?  @map("response_text")
+  tokensUsed       Int?     @map("tokens_used")
+  promptTokens     Int?     @map("prompt_tokens")
+  completionTokens Int?     @map("completion_tokens")
+  latencyMs        Int?     @map("latency_ms")
+  tabId            String?  @map("tab_id")
+  conversationTurn Int?     @map("conversation_turn")
+  codeSnippet      String?  @map("code_snippet")
+  codeLineNumber   Int?     @map("code_line_number")
+  codeBefore       String?  @map("code_before")
+  codeAfter        String?  @map("code_after")
+  metadata         Json?
+  createdAt        DateTime @default(now()) @map("created_at")
+  session          Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId])
   @@index([eventType])
@@ -310,36 +315,47 @@ model AiInteraction {
   @@map("ai_interactions")
 }
 
-// Agent Insights model - stores computed agent analysis results
 model AgentInsight {
-  id         String   @id @default(uuid())
-  sessionId  String   @unique @map("session_id")
-  watcher    Json?    @db.JsonB // Agent 6: Real-time monitoring results
-  extractor  Json?    @db.JsonB // Agent 7: Code analysis results
-  sanity     Json?    @db.JsonB // Agent 8: Risk assessment results
-  computedAt DateTime @default(now()) @map("computed_at") // When insights were computed
-  updatedAt  DateTime @updatedAt @map("updated_at") // When insights were last updated
-  version    Int      @default(1) // Version number for tracking changes
-  createdAt  DateTime @default(now()) @map("created_at")
-
-  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  id                  String   @id @default(uuid())
+  sessionId           String   @unique @map("session_id")
+  watcher             Json?
+  extractor           Json?
+  sanity              Json?
+  computedAt          DateTime @default(now()) @map("computed_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+  version             Int      @default(1)
+  createdAt           DateTime @default(now()) @map("created_at")
+  judge               Json?
+  geminiVideoAnalysis Json?    @map("gemini_video_analysis")
+  session             Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId])
   @@index([computedAt])
   @@map("agent_insights")
 }
 
-// Password Reset Code model - stores password reset codes
+model McpInsight {
+  id        String   @id @default(uuid())
+  sessionId String   @map("session_id")
+  source    String
+  payload   Json
+  createdAt DateTime @default(now()) @map("created_at")
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([sessionId, source])
+  @@map("mcp_insights")
+}
+
 model PasswordResetCode {
   id        String    @id @default(uuid())
   userId    String    @map("user_id")
-  email     String    // Email address for the reset request
-  code      String    // 6-digit reset code
-  expiresAt DateTime  @map("expires_at") // Code expiration time (15 minutes)
-  usedAt    DateTime? @map("used_at") // When code was used
+  email     String
+  code      String
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
   createdAt DateTime  @default(now()) @map("created_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([email])
   @@index([userId])

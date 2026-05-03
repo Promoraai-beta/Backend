@@ -1,0 +1,268 @@
+{
+  "name": "TaskFlow - Full-Stack Task Management App",
+  "description": "A realistic task management application with frontend and backend integration requirements. Tests full-stack development skills including database design, API integration, and UI/UX implementation.",
+  "techStack": [
+    "React",
+    "TypeScript",
+    "PostgreSQL",
+    "Django",
+    "REST API"
+  ],
+  "level": "mid-to-senior",
+  "estimatedTime": "2-3 hours",
+  "figmaFileKey": "REPLACE_WITH_YOUR_FIGMA_FILE_KEY",
+  "files": {
+    "/package.json": "{\n  \"name\": \"taskflow-frontend\",\n  \"version\": \"1.0.0\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"dev\": \"vite\",\n    \"build\": \"tsc && vite build\",\n    \"preview\": \"vite preview\",\n    \"test\": \"vitest run\",\n    \"lint\": \"eslint src --ext ts,tsx\"\n  },\n  \"dependencies\": {\n    \"react\": \"^18.2.0\",\n    \"react-dom\": \"^18.2.0\",\n    \"react-router-dom\": \"^6.20.0\",\n    \"axios\": \"^1.6.2\",\n    \"date-fns\": \"^2.30.0\",\n    \"zustand\": \"^4.4.7\",\n    \"react-query\": \"^3.39.3\",\n    \"@headlessui/react\": \"^1.7.17\",\n    \"@heroicons/react\": \"^2.1.1\",\n    \"clsx\": \"^2.0.0\"\n  },\n  \"devDependencies\": {\n    \"@types/react\": \"^18.2.0\",\n    \"@types/react-dom\": \"^18.2.0\",\n    \"@vitejs/plugin-react\": \"^4.2.1\",\n    \"@typescript-eslint/eslint-plugin\": \"^6.13.1\",\n    \"@typescript-eslint/parser\": \"^6.13.1\",\n    \"typescript\": \"^5.3.2\",\n    \"vite\": \"^5.0.4\",\n    \"vitest\": \"^1.0.4\",\n    \"@testing-library/react\": \"^14.1.2\",\n    \"@testing-library/jest-dom\": \"^6.1.5\",\n    \"jsdom\": \"^23.0.0\",\n    \"eslint\": \"^8.54.0\",\n    \"eslint-plugin-react\": \"^7.33.2\",\n    \"eslint-plugin-react-hooks\": \"^4.6.0\",\n    \"autoprefixer\": \"^10.4.16\",\n    \"postcss\": \"^8.4.32\",\n    \"tailwindcss\": \"^3.3.6\"\n  }\n}",
+    "/vite.config.ts": "import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\nimport path from 'path'\n\nexport default defineConfig({\n  plugins: [react()],\n  base: process.env.VITE_BASE || '/',\n  resolve: {\n    alias: {\n      '@': path.resolve(__dirname, './src'),\n    },\n  },\n  server: {\n    host: '0.0.0.0',\n    port: 5173,\n    strictPort: true,\n    proxy: {\n      '/api': {\n        target: 'http://localhost:8000',\n        changeOrigin: true,\n      },\n    },\n  },\n})\n",
+    "/tsconfig.json": "{\n  \"compilerOptions\": {\n    \"target\": \"ES2020\",\n    \"useDefineForClassFields\": true,\n    \"lib\": [\"ES2020\", \"DOM\", \"DOM.Iterable\"],\n    \"module\": \"ESNext\",\n    \"skipLibCheck\": true,\n    \"moduleResolution\": \"bundler\",\n    \"allowImportingTsExtensions\": true,\n    \"resolveJsonModule\": true,\n    \"isolatedModules\": true,\n    \"noEmit\": true,\n    \"jsx\": \"react-jsx\",\n    \"strict\": true,\n    \"noUnusedLocals\": true,\n    \"noUnusedParameters\": true,\n    \"noFallthroughCasesInSwitch\": true,\n    \"baseUrl\": \".\",\n    \"paths\": {\n      \"@/*\": [\"src/*\"]\n    }\n  },\n  \"include\": [\"src\"],\n  \"references\": [{ \"path\": \"./tsconfig.node.json\" }]\n}",
+    "/tsconfig.node.json": "{\n  \"compilerOptions\": {\n    \"composite\": true,\n    \"skipLibCheck\": true,\n    \"module\": \"ESNext\",\n    \"moduleResolution\": \"bundler\",\n    \"allowSyntheticDefaultImports\": true\n  },\n  \"include\": [\"vite.config.ts\"]\n}",
+    "/tailwind.config.js": "/** @type {import('tailwindcss').Config} */\nexport default {\n  content: [\n    \"./index.html\",\n    \"./src/**/*.{js,ts,jsx,tsx}\",\n  ],\n  theme: {\n    extend: {\n      colors: {\n        primary: {\n          50: '#f0f9ff',\n          100: '#e0f2fe',\n          500: '#0ea5e9',\n          600: '#0284c7',\n          700: '#0369a1',\n        },\n      },\n    },\n  },\n  plugins: [],\n}",
+    "/postcss.config.js": "export default {\n  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n}",
+    "/index.html": "<!DOCTYPE html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"UTF-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n    <meta name=\"description\" content=\"TaskFlow - Modern Task Management Application\" />\n    <title>TaskFlow - Task Management</title>\n  </head>\n  <body>\n    <div id=\"root\"></div>\n    <script type=\"module\" src=\"/src/main.tsx\"></script>\n  </body>\n</html>",
+    "/src/main.tsx": "import React from 'react'\nimport ReactDOM from 'react-dom/client'\nimport { QueryClient, QueryClientProvider } from 'react-query'\nimport App from './App'\nimport './index.css'\n\nconst queryClient = new QueryClient({\n  defaultOptions: {\n    queries: {\n      refetchOnWindowFocus: false,\n      retry: 1,\n    },\n  },\n})\n\nReactDOM.createRoot(document.getElementById('root')!).render(\n  <React.StrictMode>\n    <QueryClientProvider client={queryClient}>\n      <App />\n    </QueryClientProvider>\n  </React.StrictMode>,\n)",
+    "/src/index.css": "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\n@layer base {\n  body {\n    @apply bg-gray-50 text-gray-900;\n  }\n}\n\n@layer components {\n  .btn-primary {\n    @apply bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;\n  }\n  \n  .btn-secondary {\n    @apply bg-gray-200 text-gray-800 px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors;\n  }\n  \n  .card {\n    @apply bg-white rounded-lg shadow-sm border border-gray-200 p-6;\n  }\n  \n  .input-field {\n    @apply w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;\n  }\n}",
+    "/src/App.tsx": "import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'\nimport { Toaster } from 'react-hot-toast'\nimport Layout from './components/Layout'\nimport Dashboard from './pages/Dashboard'\nimport TasksPage from './pages/TasksPage'\nimport TaskDetail from './pages/TaskDetail'\nimport ProjectsPage from './pages/ProjectsPage'\n\nfunction App() {\n  return (\n    <Router>\n      <Layout>\n        <Routes>\n          <Route path=\"/\" element={<Dashboard />} />\n          <Route path=\"/tasks\" element={<TasksPage />} />\n          <Route path=\"/tasks/:id\" element={<TaskDetail />} />\n          <Route path=\"/projects\" element={<ProjectsPage />} />\n        </Routes>\n      </Layout>\n      <Toaster position=\"top-right\" />\n    </Router>\n  )\n}\n\nexport default App",
+    "/src/types/index.ts": "export interface User {\n  id: string\n  email: string\n  name: string\n  avatar?: string\n}\n\nexport interface Project {\n  id: string\n  name: string\n  description?: string\n  color: string\n  createdAt: string\n  updatedAt: string\n  taskCount?: number\n}\n\nexport type TaskStatus = 'todo' | 'in_progress' | 'in_review' | 'done'\nexport type TaskPriority = 'low' | 'medium' | 'high'\n\nexport interface Task {\n  id: string\n  title: string\n  description?: string\n  status: TaskStatus\n  priority: TaskPriority\n  dueDate?: string\n  projectId: string\n  assigneeId?: string\n  assignee?: User\n  project?: Project\n  createdAt: string\n  updatedAt: string\n  tags?: string[]\n  estimatedHours?: number\n  actualHours?: number\n}\n\nexport interface TaskFilter {\n  status?: TaskStatus[]\n  priority?: TaskPriority[]\n  projectId?: string\n  assigneeId?: string\n  search?: string\n}\n\nexport interface ApiResponse<T> {\n  data: T\n  message?: string\n  errors?: Record<string, string[]>\n}\n\nexport interface PaginatedResponse<T> {\n  results: T[]\n  count: number\n  next: string | null\n  previous: string | null\n}",
+    "/src/lib/api.ts": "import axios from 'axios'\nimport type { Task, Project, User, TaskFilter, PaginatedResponse, ApiResponse } from '@/types'\n\nconst API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'\n\nconst api = axios.create({\n  baseURL: API_BASE_URL,\n  headers: {\n    'Content-Type': 'application/json',\n  },\n})\n\n// Add request interceptor for auth token\napi.interceptors.request.use((config) => {\n  const token = localStorage.getItem('auth_token')\n  if (token) {\n    config.headers.Authorization = `Bearer ${token}`\n  }\n  return config\n})\n\n// Tasks API\nexport const tasksApi = {\n  getAll: async (filters?: TaskFilter): Promise<PaginatedResponse<Task>> => {\n    const params = new URLSearchParams()\n    if (filters?.status) filters.status.forEach(s => params.append('status', s))\n    if (filters?.priority) filters.priority.forEach(p => params.append('priority', p))\n    if (filters?.projectId) params.append('project', filters.projectId)\n    if (filters?.assigneeId) params.append('assignee', filters.assigneeId)\n    if (filters?.search) params.append('search', filters.search)\n    \n    const { data } = await api.get<PaginatedResponse<Task>>(`/tasks/?${params.toString()}`)\n    return data\n  },\n  \n  getById: async (id: string): Promise<Task> => {\n    const { data } = await api.get<ApiResponse<Task>>(`/tasks/${id}/`)\n    return data.data\n  },\n  \n  create: async (task: Partial<Task>): Promise<Task> => {\n    const { data } = await api.post<ApiResponse<Task>>('/tasks/', task)\n    return data.data\n  },\n  \n  update: async (id: string, task: Partial<Task>): Promise<Task> => {\n    const { data } = await api.patch<ApiResponse<Task>>(`/tasks/${id}/`, task)\n    return data.data\n  },\n  \n  delete: async (id: string): Promise<void> => {\n    await api.delete(`/tasks/${id}/`)\n  },\n  \n  updateStatus: async (id: string, status: Task['status']): Promise<Task> => {\n    return tasksApi.update(id, { status })\n  },\n}\n\n// Projects API\nexport const projectsApi = {\n  getAll: async (): Promise<Project[]> => {\n    const { data } = await api.get<ApiResponse<Project[]>>('/projects/')\n    return data.data\n  },\n  \n  getById: async (id: string): Promise<Project> => {\n    const { data } = await api.get<ApiResponse<Project>>(`/projects/${id}/`)\n    return data.data\n  },\n  \n  create: async (project: Partial<Project>): Promise<Project> => {\n    const { data } = await api.post<ApiResponse<Project>>('/projects/', project)\n    return data.data\n  },\n  \n  update: async (id: string, project: Partial<Project>): Promise<Project> => {\n    const { data } = await api.patch<ApiResponse<Project>>(`/projects/${id}/`, project)\n    return data.data\n  },\n  \n  delete: async (id: string): Promise<void> => {\n    await api.delete(`/projects/${id}/`)\n  },\n}\n\n// Users API\nexport const usersApi = {\n  getCurrentUser: async (): Promise<User> => {\n    const { data } = await api.get<ApiResponse<User>>('/users/me/')\n    return data.data\n  },\n  \n  getAll: async (): Promise<User[]> => {\n    const { data } = await api.get<ApiResponse<User[]>>('/users/')\n    return data.data\n  },\n}",
+    "/src/components/Layout.tsx": "import { Link, useLocation } from 'react-router-dom'\nimport { \n  HomeIcon, \n  ClipboardDocumentListIcon, \n  FolderIcon,\n  Bars3Icon\n} from '@heroicons/react/24/outline'\nimport { useState } from 'react'\n\ninterface LayoutProps {\n  children: React.ReactNode\n}\n\nexport default function Layout({ children }: LayoutProps) {\n  const location = useLocation()\n  const [sidebarOpen, setSidebarOpen] = useState(false)\n  \n  const navigation = [\n    { name: 'Dashboard', href: '/', icon: HomeIcon },\n    { name: 'Tasks', href: '/tasks', icon: ClipboardDocumentListIcon },\n    { name: 'Projects', href: '/projects', icon: FolderIcon },\n  ]\n  \n  return (\n    <div className=\"min-h-screen bg-gray-50\">\n      {/* Mobile sidebar */}\n      {sidebarOpen && (\n        <div className=\"fixed inset-0 z-40 lg:hidden\">\n          <div className=\"fixed inset-0 bg-gray-600 bg-opacity-75\" onClick={() => setSidebarOpen(false)} />\n          <div className=\"fixed inset-y-0 left-0 flex w-64 flex-col bg-white shadow-xl\">\n            <SidebarContent navigation={navigation} location={location} />\n          </div>\n        </div>\n      )}\n      \n      <div className=\"flex\">\n        {/* Desktop sidebar */}\n        <aside className=\"hidden lg:flex lg:w-64 lg:flex-col\">\n          <div className=\"flex flex-col flex-grow bg-white border-r border-gray-200 pt-5 pb-4 overflow-y-auto\">\n            <SidebarContent navigation={navigation} location={location} />\n          </div>\n        </aside>\n        \n        {/* Main content */}\n        <div className=\"flex flex-col flex-1 w-0 overflow-hidden\">\n          {/* Top bar */}\n          <div className=\"sticky top-0 z-10 flex-shrink-0 flex h-16 bg-white shadow\">\n            <button\n              type=\"button\"\n              className=\"px-4 border-r border-gray-200 text-gray-500 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary-500 lg:hidden\"\n              onClick={() => setSidebarOpen(true)}\n            >\n              <Bars3Icon className=\"h-6 w-6\" />\n            </button>\n            <div className=\"flex-1 px-4 flex justify-between items-center\">\n              <h1 className=\"text-xl font-semibold text-gray-900\">TaskFlow</h1>\n              <div className=\"flex items-center space-x-4\">\n                <span className=\"text-sm text-gray-500\">Demo User</span>\n              </div>\n            </div>\n          </div>\n          \n          {/* Page content */}\n          <main className=\"flex-1 relative overflow-y-auto focus:outline-none\">\n            <div className=\"py-6\">\n              <div className=\"max-w-7xl mx-auto px-4 sm:px-6 md:px-8\">\n                {children}\n              </div>\n            </div>\n          </main>\n        </div>\n      </div>\n    </div>\n  )\n}\n\nfunction SidebarContent({ navigation, location }: { navigation: any[], location: any }) {\n  return (\n    <div className=\"flex-1 flex flex-col pt-5 pb-4 overflow-y-auto\">\n      <div className=\"flex items-center flex-shrink-0 px-4\">\n        <h2 className=\"text-2xl font-bold text-primary-600\">TaskFlow</h2>\n      </div>\n      <nav className=\"mt-5 flex-1 px-2 space-y-1\">\n        {navigation.map((item) => {\n          const isActive = location.pathname === item.href\n          return (\n            <Link\n              key={item.name}\n              to={item.href}\n              className={`group flex items-center px-2 py-2 text-sm font-medium rounded-md ${\n                isActive\n                  ? 'bg-primary-50 text-primary-600'\n                  : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'\n              }`}\n            >\n              <item.icon\n                className={`mr-3 flex-shrink-0 h-6 w-6 ${\n                  isActive ? 'text-primary-600' : 'text-gray-400 group-hover:text-gray-500'\n                }`}\n              />\n              {item.name}\n            </Link>\n          )\n        })}\n      </nav>\n    </div>\n  )\n}",
+    "/src/components/TaskCard.tsx": "import { Link } from 'react-router-dom'\nimport { format } from 'date-fns'\nimport type { Task } from '@/types'\nimport { \n  CheckCircleIcon, \n  ClockIcon, \n  ExclamationTriangleIcon,\n  CalendarIcon\n} from '@heroicons/react/24/outline'\n\ninterface TaskCardProps {\n  task: Task\n  onStatusChange?: (id: string, status: Task['status']) => void\n}\n\nexport default function TaskCard({ task, onStatusChange }: TaskCardProps) {\n  const statusColors = {\n    todo: 'bg-gray-100 text-gray-800',\n    in_progress: 'bg-blue-100 text-blue-800',\n    in_review: 'bg-yellow-100 text-yellow-800',\n    done: 'bg-green-100 text-green-800',\n  }\n  \n  const priorityColors = {\n    low: 'text-gray-500',\n    medium: 'text-yellow-500',\n    high: 'text-red-500',\n  }\n  \n  return (\n    <Link to={`/tasks/${task.id}`} className=\"block\">\n      <div className=\"card hover:shadow-md transition-shadow cursor-pointer\">\n        <div className=\"flex items-start justify-between mb-3\">\n          <h3 className=\"text-lg font-semibold text-gray-900 flex-1\">{task.title}</h3>\n          <span className={`px-2 py-1 text-xs font-medium rounded-full ${statusColors[task.status]}`}>\n            {task.status.replace('_', ' ')}\n          </span>\n        </div>\n        \n        {task.description && (\n          <p className=\"text-sm text-gray-600 mb-3 line-clamp-2\">{task.description}</p>\n        )}\n        \n        <div className=\"flex items-center justify-between text-sm\">\n          <div className=\"flex items-center space-x-4\">\n            {task.project && (\n              <span className=\"flex items-center text-gray-600\">\n                <span \n                  className=\"w-3 h-3 rounded-full mr-2\" \n                  style={{ backgroundColor: task.project.color }}\n                />\n                {task.project.name}\n              </span>\n            )}\n            \n            {task.dueDate && (\n              <span className={`flex items-center ${priorityColors[task.priority]}`}>\n                <CalendarIcon className=\"w-4 h-4 mr-1\" />\n                {format(new Date(task.dueDate), 'MMM d')}\n              </span>\n            )}\n          </div>\n          \n          <div className=\"flex items-center space-x-2\">\n            {task.priority === 'high' && (\n              <ExclamationTriangleIcon className=\"w-5 h-5 text-red-500\" />\n            )}\n            {task.assignee && (\n              <div className=\"w-6 h-6 rounded-full bg-primary-500 flex items-center justify-center text-white text-xs\">\n                {task.assignee.name.charAt(0).toUpperCase()}\n              </div>\n            )}\n          </div>\n        </div>\n      </div>\n    </Link>\n  )\n}",
+    "/src/components/TaskForm.tsx": "import { useState, useEffect } from 'react'\nimport type { Task, Project } from '@/types'\nimport { projectsApi } from '@/lib/api'\n\ninterface TaskFormProps {\n  task?: Task\n  onSubmit: (task: Partial<Task>) => Promise<void>\n  onCancel: () => void\n}\n\nexport default function TaskForm({ task, onSubmit, onCancel }: TaskFormProps) {\n  const [formData, setFormData] = useState<Partial<Task>>({\n    title: '',\n    description: '',\n    status: 'todo',\n    priority: 'medium',\n    projectId: '',\n    dueDate: '',\n    ...task,\n  })\n  \n  const [projects, setProjects] = useState<Project[]>([])\n  const [loading, setLoading] = useState(false)\n  \n  useEffect(() => {\n    projectsApi.getAll().then(setProjects).catch(console.error)\n  }, [])\n  \n  const handleSubmit = async (e: React.FormEvent) => {\n    e.preventDefault()\n    setLoading(true)\n    try {\n      await onSubmit(formData)\n    } finally {\n      setLoading(false)\n    }\n  }\n  \n  return (\n    <form onSubmit={handleSubmit} className=\"space-y-4\">\n      <div>\n        <label className=\"block text-sm font-medium text-gray-700 mb-1\">\n          Title *\n        </label>\n        <input\n          type=\"text\"\n          required\n          className=\"input-field\"\n          value={formData.title || ''}\n          onChange={(e) => setFormData({ ...formData, title: e.target.value })}\n        />\n      </div>\n      \n      <div>\n        <label className=\"block text-sm font-medium text-gray-700 mb-1\">\n          Description\n        </label>\n        <textarea\n          rows={4}\n          className=\"input-field\"\n          value={formData.description || ''}\n          onChange={(e) => setFormData({ ...formData, description: e.target.value })}\n        />\n      </div>\n      \n      <div className=\"grid grid-cols-2 gap-4\">\n        <div>\n          <label className=\"block text-sm font-medium text-gray-700 mb-1\">\n            Status\n          </label>\n          <select\n            className=\"input-field\"\n            value={formData.status}\n            onChange={(e) => setFormData({ ...formData, status: e.target.value as Task['status'] })}\n          >\n            <option value=\"todo\">To Do</option>\n            <option value=\"in_progress\">In Progress</option>\n            <option value=\"in_review\">In Review</option>\n            <option value=\"done\">Done</option>\n          </select>\n        </div>\n        \n        <div>\n          <label className=\"block text-sm font-medium text-gray-700 mb-1\">\n            Priority\n          </label>\n          <select\n            className=\"input-field\"\n            value={formData.priority}\n            onChange={(e) => setFormData({ ...formData, priority: e.target.value as Task['priority'] })}\n          >\n            <option value=\"low\">Low</option>\n            <option value=\"medium\">Medium</option>\n            <option value=\"high\">High</option>\n          </select>\n        </div>\n      </div>\n      \n      <div className=\"grid grid-cols-2 gap-4\">\n        <div>\n          <label className=\"block text-sm font-medium text-gray-700 mb-1\">\n            Project\n          </label>\n          <select\n            className=\"input-field\"\n            value={formData.projectId || ''}\n            onChange={(e) => setFormData({ ...formData, projectId: e.target.value })}\n          >\n            <option value=\"\">Select a project</option>\n            {projects.map((project) => (\n              <option key={project.id} value={project.id}>\n                {project.name}\n              </option>\n            ))}\n          </select>\n        </div>\n        \n        <div>\n          <label className=\"block text-sm font-medium text-gray-700 mb-1\">\n            Due Date\n          </label>\n          <input\n            type=\"date\"\n            className=\"input-field\"\n            value={formData.dueDate || ''}\n            onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}\n          />\n        </div>\n      </div>\n      \n      <div className=\"flex justify-end space-x-3 pt-4\">\n        <button type=\"button\" onClick={onCancel} className=\"btn-secondary\">\n          Cancel\n        </button>\n        <button type=\"submit\" disabled={loading} className=\"btn-primary\">\n          {loading ? 'Saving...' : task ? 'Update Task' : 'Create Task'}\n        </button>\n      </div>\n    </form>\n  )\n}",
+    "/src/components/TaskFilter.tsx": "import type { TaskFilter } from '@/types'\n\ninterface TaskFilterProps {\n  filters: TaskFilter\n  onChange: (filters: TaskFilter) => void\n  projects: Array<{ id: string; name: string }>\n}\n\nexport default function TaskFilter({ filters, onChange, projects }: TaskFilterProps) {\n  return (\n    <div className=\"card mb-6\">\n      <div className=\"grid grid-cols-1 md:grid-cols-4 gap-4\">\n        <div>\n          <label className=\"block text-sm font-medium text-gray-700 mb-1\">\n            Search\n          </label>\n          <input\n            type=\"text\"\n            placeholder=\"Search tasks...\"\n            className=\"input-field\"\n            value={filters.search || ''}\n            onChange={(e) => onChange({ ...filters, search: e.target.value })}\n          />\n        </div>\n        \n        <div>\n          <label className=\"block text-sm font-medium text-gray-700 mb-1\">\n            Status\n          </label>\n          <select\n            className=\"input-field\"\n            value={filters.status?.[0] || ''}\n            onChange={(e) => onChange({ \n              ...filters, \n              status: e.target.value ? [e.target.value as any] : undefined \n            })}\n          >\n            <option value=\"\">All Statuses</option>\n            <option value=\"todo\">To Do</option>\n            <option value=\"in_progress\">In Progress</option>\n            <option value=\"in_review\">In Review</option>\n            <option value=\"done\">Done</option>\n          </select>\n        </div>\n        \n        <div>\n          <label className=\"block text-sm font-medium text-gray-700 mb-1\">\n            Priority\n          </label>\n          <select\n            className=\"input-field\"\n            value={filters.priority?.[0] || ''}\n            onChange={(e) => onChange({ \n              ...filters, \n              priority: e.target.value ? [e.target.value as any] : undefined \n            })}\n          >\n            <option value=\"\">All Priorities</option>\n            <option value=\"low\">Low</option>\n            <option value=\"medium\">Medium</option>\n            <option value=\"high\">High</option>\n          </select>\n        </div>\n        \n        <div>\n          <label className=\"block text-sm font-medium text-gray-700 mb-1\">\n            Project\n          </label>\n          <select\n            className=\"input-field\"\n            value={filters.projectId || ''}\n            onChange={(e) => onChange({ ...filters, projectId: e.target.value || undefined })}\n          >\n            <option value=\"\">All Projects</option>\n            {projects.map((project) => (\n              <option key={project.id} value={project.id}>\n                {project.name}\n              </option>\n            ))}\n          </select>\n        </div>\n      </div>\n    </div>\n  )\n}",
+    "/src/pages/Dashboard.tsx": "import { useQuery } from 'react-query'\nimport { tasksApi, projectsApi } from '@/lib/api'\nimport TaskCard from '@/components/TaskCard'\nimport type { Task, Project } from '@/types'\nimport { format } from 'date-fns'\n\nexport default function Dashboard() {\n  const { data: tasks, isLoading: tasksLoading } = useQuery<Task[]>(\n    'tasks',\n    async () => {\n      const response = await tasksApi.getAll()\n      return response.results\n    }\n  )\n  \n  const { data: projects, isLoading: projectsLoading } = useQuery<Project[]>(\n    'projects',\n    projectsApi.getAll\n  )\n  \n  if (tasksLoading || projectsLoading) {\n    return <div className=\"text-center py-12\">Loading dashboard...</div>\n  }\n  \n  const recentTasks = tasks?.slice(0, 5) || []\n  const stats = {\n    total: tasks?.length || 0,\n    todo: tasks?.filter(t => t.status === 'todo').length || 0,\n    inProgress: tasks?.filter(t => t.status === 'in_progress').length || 0,\n    done: tasks?.filter(t => t.status === 'done').length || 0,\n  }\n  \n  return (\n    <div>\n      <h1 className=\"text-3xl font-bold text-gray-900 mb-8\">Dashboard</h1>\n      \n      {/* Stats Grid */}\n      <div className=\"grid grid-cols-1 md:grid-cols-4 gap-6 mb-8\">\n        <div className=\"card\">\n          <h3 className=\"text-sm font-medium text-gray-500 mb-1\">Total Tasks</h3>\n          <p className=\"text-3xl font-bold text-gray-900\">{stats.total}</p>\n        </div>\n        <div className=\"card\">\n          <h3 className=\"text-sm font-medium text-gray-500 mb-1\">To Do</h3>\n          <p className=\"text-3xl font-bold text-blue-600\">{stats.todo}</p>\n        </div>\n        <div className=\"card\">\n          <h3 className=\"text-sm font-medium text-gray-500 mb-1\">In Progress</h3>\n          <p className=\"text-3xl font-bold text-yellow-600\">{stats.inProgress}</p>\n        </div>\n        <div className=\"card\">\n          <h3 className=\"text-sm font-medium text-gray-500 mb-1\">Completed</h3>\n          <p className=\"text-3xl font-bold text-green-600\">{stats.done}</p>\n        </div>\n      </div>\n      \n      {/* Recent Tasks */}\n      <div className=\"mb-8\">\n        <h2 className=\"text-xl font-semibold text-gray-900 mb-4\">Recent Tasks</h2>\n        <div className=\"grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4\">\n          {recentTasks.map((task) => (\n            <TaskCard key={task.id} task={task} />\n          ))}\n          {recentTasks.length === 0 && (\n            <p className=\"text-gray-500 col-span-full text-center py-8\">\n              No tasks yet. Create your first task!\n            </p>\n          )}\n        </div>\n      </div>\n      \n      {/* Projects Overview */}\n      {projects && projects.length > 0 && (\n        <div>\n          <h2 className=\"text-xl font-semibold text-gray-900 mb-4\">Projects</h2>\n          <div className=\"grid grid-cols-1 md:grid-cols-3 gap-4\">\n            {projects.map((project) => (\n              <div key={project.id} className=\"card\">\n                <div className=\"flex items-center mb-2\">\n                  <span \n                    className=\"w-4 h-4 rounded-full mr-3\" \n                    style={{ backgroundColor: project.color }}\n                  />\n                  <h3 className=\"font-semibold text-gray-900\">{project.name}</h3>\n                </div>\n                {project.description && (\n                  <p className=\"text-sm text-gray-600 mb-2\">{project.description}</p>\n                )}\n                <p className=\"text-xs text-gray-500\">\n                  {project.taskCount || 0} tasks\n                </p>\n              </div>\n            ))}\n          </div>\n        </div>\n      )}\n    </div>\n  )\n}",
+    "/src/pages/TasksPage.tsx": "import { useState } from 'react'\nimport { useQuery, useMutation, useQueryClient } from 'react-query'\nimport { tasksApi, projectsApi } from '@/lib/api'\nimport TaskCard from '@/components/TaskCard'\nimport TaskFilter from '@/components/TaskFilter'\nimport TaskForm from '@/components/TaskForm'\nimport type { Task, TaskFilter as TaskFilterType, Project } from '@/types'\nimport { PlusIcon } from '@heroicons/react/24/outline'\nimport toast from 'react-hot-toast'\n\nexport default function TasksPage() {\n  const [filters, setFilters] = useState<TaskFilterType>({})\n  const [showForm, setShowForm] = useState(false)\n  const queryClient = useQueryClient()\n  \n  const { data: tasksData, isLoading } = useQuery(\n    ['tasks', filters],\n    () => tasksApi.getAll(filters)\n  )\n  \n  const { data: projects } = useQuery<Project[]>('projects', projectsApi.getAll)\n  \n  const createMutation = useMutation(tasksApi.create, {\n    onSuccess: () => {\n      queryClient.invalidateQueries('tasks')\n      toast.success('Task created successfully')\n      setShowForm(false)\n    },\n    onError: () => {\n      toast.error('Failed to create task')\n    },\n  })\n  \n  const handleCreateTask = async (task: Partial<Task>) => {\n    await createMutation.mutateAsync(task)\n  }\n  \n  return (\n    <div>\n      <div className=\"flex justify-between items-center mb-6\">\n        <h1 className=\"text-3xl font-bold text-gray-900\">Tasks</h1>\n        <button\n          onClick={() => setShowForm(!showForm)}\n          className=\"btn-primary flex items-center\"\n        >\n          <PlusIcon className=\"w-5 h-5 mr-2\" />\n          New Task\n        </button>\n      </div>\n      \n      {showForm && (\n        <div className=\"card mb-6\">\n          <h2 className=\"text-xl font-semibold mb-4\">Create New Task</h2>\n          <TaskForm\n            onSubmit={handleCreateTask}\n            onCancel={() => setShowForm(false)}\n          />\n        </div>\n      )}\n      \n      {projects && (\n        <TaskFilter\n          filters={filters}\n          onChange={setFilters}\n          projects={projects}\n        />\n      )}\n      \n      {isLoading ? (\n        <div className=\"text-center py-12\">Loading tasks...</div>\n      ) : (\n        <div className=\"grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4\">\n          {tasksData?.results.map((task) => (\n            <TaskCard key={task.id} task={task} />\n          ))}\n          {tasksData?.results.length === 0 && (\n            <p className=\"text-gray-500 col-span-full text-center py-12\">\n              No tasks found. Create your first task!\n            </p>\n          )}\n        </div>\n      )}\n    </div>\n  )\n}",
+    "/src/pages/TaskDetail.tsx": "import { useParams, useNavigate } from 'react-router-dom'\nimport { useQuery, useMutation, useQueryClient } from 'react-query'\nimport { tasksApi } from '@/lib/api'\nimport TaskForm from '@/components/TaskForm'\nimport type { Task } from '@/types'\nimport { format } from 'date-fns'\nimport toast from 'react-hot-toast'\nimport { ArrowLeftIcon, TrashIcon } from '@heroicons/react/24/outline'\n\nexport default function TaskDetail() {\n  const { id } = useParams<{ id: string }>()\n  const navigate = useNavigate()\n  const queryClient = useQueryClient()\n  \n  const { data: task, isLoading } = useQuery<Task>(\n    ['task', id],\n    () => tasksApi.getById(id!),\n    { enabled: !!id }\n  )\n  \n  const updateMutation = useMutation(\n    (data: Partial<Task>) => tasksApi.update(id!, data),\n    {\n      onSuccess: () => {\n        queryClient.invalidateQueries(['task', id])\n        queryClient.invalidateQueries('tasks')\n        toast.success('Task updated successfully')\n      },\n      onError: () => {\n        toast.error('Failed to update task')\n      },\n    }\n  )\n  \n  const deleteMutation = useMutation(() => tasksApi.delete(id!), {\n    onSuccess: () => {\n      queryClient.invalidateQueries('tasks')\n      toast.success('Task deleted successfully')\n      navigate('/tasks')\n    },\n    onError: () => {\n      toast.error('Failed to delete task')\n    },\n  })\n  \n  if (isLoading) {\n    return <div className=\"text-center py-12\">Loading task...</div>\n  }\n  \n  if (!task) {\n    return (\n      <div className=\"text-center py-12\">\n        <p className=\"text-gray-500 mb-4\">Task not found</p>\n        <button onClick={() => navigate('/tasks')} className=\"btn-primary\">\n          Back to Tasks\n        </button>\n      </div>\n    )\n  }\n  \n  return (\n    <div>\n      <div className=\"flex items-center justify-between mb-6\">\n        <button\n          onClick={() => navigate('/tasks')}\n          className=\"flex items-center text-gray-600 hover:text-gray-900\"\n        >\n          <ArrowLeftIcon className=\"w-5 h-5 mr-2\" />\n          Back to Tasks\n        </button>\n        <button\n          onClick={() => deleteMutation.mutate()}\n          className=\"flex items-center text-red-600 hover:text-red-700\"\n        >\n          <TrashIcon className=\"w-5 h-5 mr-2\" />\n          Delete\n        </button>\n      </div>\n      \n      <div className=\"card\">\n        <h1 className=\"text-3xl font-bold text-gray-900 mb-6\">{task.title}</h1>\n        \n        <TaskForm\n          task={task}\n          onSubmit={async (data) => await updateMutation.mutateAsync(data)}\n          onCancel={() => navigate('/tasks')}\n        />\n      </div>\n    </div>\n  )\n}",
+    "/src/pages/ProjectsPage.tsx": "import { useState } from 'react'\nimport { useQuery, useMutation, useQueryClient } from 'react-query'\nimport { projectsApi } from '@/lib/api'\nimport type { Project } from '@/types'\nimport { PlusIcon, PencilIcon, TrashIcon } from '@heroicons/react/24/outline'\nimport toast from 'react-hot-toast'\n\nexport default function ProjectsPage() {\n  const [showForm, setShowForm] = useState(false)\n  const [editingProject, setEditingProject] = useState<Project | null>(null)\n  const queryClient = useQueryClient()\n  \n  const { data: projects, isLoading } = useQuery<Project[]>('projects', projectsApi.getAll)\n  \n  const createMutation = useMutation(projectsApi.create, {\n    onSuccess: () => {\n      queryClient.invalidateQueries('projects')\n      toast.success('Project created successfully')\n      setShowForm(false)\n    },\n    onError: () => {\n      toast.error('Failed to create project')\n    },\n  })\n  \n  const updateMutation = useMutation(\n    ({ id, data }: { id: string; data: Partial<Project> }) => projectsApi.update(id, data),\n    {\n      onSuccess: () => {\n        queryClient.invalidateQueries('projects')\n        toast.success('Project updated successfully')\n        setEditingProject(null)\n      },\n      onError: () => {\n        toast.error('Failed to update project')\n      },\n    }\n  )\n  \n  const deleteMutation = useMutation(projectsApi.delete, {\n    onSuccess: () => {\n      queryClient.invalidateQueries('projects')\n      toast.success('Project deleted successfully')\n    },\n    onError: () => {\n      toast.error('Failed to delete project')\n    },\n  })\n  \n  const handleSubmit = async (project: Partial<Project>) => {\n    if (editingProject) {\n      await updateMutation.mutateAsync({ id: editingProject.id, data: project })\n    } else {\n      await createMutation.mutateAsync(project)\n    }\n  }\n  \n  return (\n    <div>\n      <div className=\"flex justify-between items-center mb-6\">\n        <h1 className=\"text-3xl font-bold text-gray-900\">Projects</h1>\n        <button\n          onClick={() => {\n            setEditingProject(null)\n            setShowForm(true)\n          }}\n          className=\"btn-primary flex items-center\"\n        >\n          <PlusIcon className=\"w-5 h-5 mr-2\" />\n          New Project\n        </button>\n      </div>\n      \n      {isLoading ? (\n        <div className=\"text-center py-12\">Loading projects...</div>\n      ) : (\n        <div className=\"grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6\">\n          {projects?.map((project) => (\n            <div key={project.id} className=\"card\">\n              <div className=\"flex items-start justify-between mb-4\">\n                <div className=\"flex items-center flex-1\">\n                  <span\n                    className=\"w-6 h-6 rounded-full mr-3\"\n                    style={{ backgroundColor: project.color }}\n                  />\n                  <h3 className=\"text-xl font-semibold text-gray-900\">{project.name}</h3>\n                </div>\n                <div className=\"flex space-x-2\">\n                  <button\n                    onClick={() => {\n                      setEditingProject(project)\n                      setShowForm(true)\n                    }}\n                    className=\"text-gray-600 hover:text-gray-900\"\n                  >\n                    <PencilIcon className=\"w-5 h-5\" />\n                  </button>\n                  <button\n                    onClick={() => deleteMutation.mutate(project.id)}\n                    className=\"text-red-600 hover:text-red-700\"\n                  >\n                    <TrashIcon className=\"w-5 h-5\" />\n                  </button>\n                </div>\n              </div>\n              \n              {project.description && (\n                <p className=\"text-gray-600 mb-4\">{project.description}</p>\n              )}\n              \n              <div className=\"text-sm text-gray-500\">\n                <p>Created: {format(new Date(project.createdAt), 'MMM d, yyyy')}</p>\n                {project.taskCount !== undefined && (\n                  <p>Tasks: {project.taskCount}</p>\n                )}\n              </div>\n            </div>\n          ))}\n          \n          {projects?.length === 0 && (\n            <p className=\"text-gray-500 col-span-full text-center py-12\">\n              No projects yet. Create your first project!\n            </p>\n          )}\n        </div>\n      )}\n      \n      {showForm && (\n        <div className=\"fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4\">\n          <div className=\"bg-white rounded-lg p-6 max-w-md w-full\">\n            <h2 className=\"text-xl font-semibold mb-4\">\n              {editingProject ? 'Edit Project' : 'Create Project'}\n            </h2>\n            <ProjectForm\n              project={editingProject}\n              onSubmit={handleSubmit}\n              onCancel={() => {\n                setShowForm(false)\n                setEditingProject(null)\n              }}\n            />\n          </div>\n        </div>\n      )}\n    </div>\n  )\n}\n\nfunction ProjectForm({ project, onSubmit, onCancel }: { project: Project | null, onSubmit: (p: Partial<Project>) => Promise<void>, onCancel: () => void }) {\n  const [formData, setFormData] = useState<Partial<Project>>({\n    name: project?.name || '',\n    description: project?.description || '',\n    color: project?.color || '#3B82F6',\n  })\n  \n  const handleSubmit = async (e: React.FormEvent) => {\n    e.preventDefault()\n    await onSubmit(formData)\n  }\n  \n  return (\n    <form onSubmit={handleSubmit} className=\"space-y-4\">\n      <div>\n        <label className=\"block text-sm font-medium text-gray-700 mb-1\">\n          Name *\n        </label>\n        <input\n          type=\"text\"\n          required\n          className=\"input-field\"\n          value={formData.name || ''}\n          onChange={(e) => setFormData({ ...formData, name: e.target.value })}\n        />\n      </div>\n      \n      <div>\n        <label className=\"block text-sm font-medium text-gray-700 mb-1\">\n          Description\n        </label>\n        <textarea\n          rows={3}\n          className=\"input-field\"\n          value={formData.description || ''}\n          onChange={(e) => setFormData({ ...formData, description: e.target.value })}\n        />\n      </div>\n      \n      <div>\n        <label className=\"block text-sm font-medium text-gray-700 mb-1\">\n          Color\n        </label>\n        <input\n          type=\"color\"\n          className=\"w-full h-10 rounded\"\n          value={formData.color}\n          onChange={(e) => setFormData({ ...formData, color: e.target.value })}\n        />\n      </div>\n      \n      <div className=\"flex justify-end space-x-3 pt-4\">\n        <button type=\"button\" onClick={onCancel} className=\"btn-secondary\">\n          Cancel\n        </button>\n        <button type=\"submit\" className=\"btn-primary\">\n          {project ? 'Update' : 'Create'} Project\n        </button>\n      </div>\n    </form>\n  )\n}",
+    "/.env.example": "VITE_API_URL=http://localhost:8000/api",
+    "/README.md": "# TaskFlow - Full-Stack Task Management Application\n\n## Overview\n\nTaskFlow is a modern task management application that requires both frontend and backend development. This project tests your ability to:\n\n- Build a production-ready React frontend\n- Integrate with a REST API backend\n- Design and implement database schemas\n- Handle state management and data fetching\n- Create responsive, accessible UI components\n\n## Tech Stack\n\n### Frontend\n- **React 18** with TypeScript\n- **Vite** for build tooling\n- **React Router** for navigation\n- **React Query** for data fetching and caching\n- **Tailwind CSS** for styling\n- **Axios** for HTTP requests\n\n### Backend (You Need to Build)\n- **Django** REST Framework\n- **PostgreSQL** database\n- **JWT** authentication\n- **RESTful API** endpoints\n\n## Project Structure\n\n```\nsrc/\n  ├── components/     # Reusable UI components\n  ├── pages/         # Page components\n  ├── lib/           # API client and utilities\n  ├── types/         # TypeScript type definitions\n  └── App.tsx        # Main app component\n```\n\n## Getting Started\n\n### Frontend Setup\n\n1. Install dependencies:\n   ```bash\n   npm install\n   ```\n\n2. Start the development server:\n   ```bash\n   npm run dev\n   ```\n\n3. Open http://localhost:5173\n\n### Backend Setup (Your Task)\n\nYou need to create a Django backend with the following requirements:\n\n#### Database Schema\n\nCreate PostgreSQL models for:\n- **User**: id, email, name, password_hash, created_at\n- **Project**: id, name, description, color, owner_id (FK), created_at, updated_at\n- **Task**: id, title, description, status, priority, due_date, project_id (FK), assignee_id (FK), created_at, updated_at\n\n#### API Endpoints\n\nImplement these REST endpoints:\n\n**Tasks**\n- `GET /api/tasks/` - List tasks (with filtering)\n- `GET /api/tasks/{id}/` - Get task details\n- `POST /api/tasks/` - Create task\n- `PATCH /api/tasks/{id}/` - Update task\n- `DELETE /api/tasks/{id}/` - Delete task\n\n**Projects**\n- `GET /api/projects/` - List projects\n- `GET /api/projects/{id}/` - Get project details\n- `POST /api/projects/` - Create project\n- `PATCH /api/projects/{id}/` - Update project\n- `DELETE /api/projects/{id}/` - Delete project\n\n**Users**\n- `GET /api/users/me/` - Get current user\n- `GET /api/users/` - List users (for assignee selection)\n\n#### Response Format\n\nAll endpoints should return JSON in this format:\n\n```json\n{\n  \"data\": { ... },\n  \"message\": \"Success message (optional)\",\n  \"errors\": { \"field\": [\"error1\", \"error2\"] } // Only on errors\n}\n```\n\nFor paginated lists:\n```json\n{\n  \"results\": [...],\n  \"count\": 100,\n  \"next\": \"http://api/tasks/?page=2\",\n  \"previous\": null\n}\n```\n\n## Assessment Tasks\n\n### Task 1: Backend API Implementation (Required)\n\n**Objective**: Build a complete Django REST API backend\n\n**Requirements**:\n1. Set up Django project with PostgreSQL database\n2. Create models for User, Project, and Task\n3. Implement all API endpoints listed above\n4. Add proper validation and error handling\n5. Implement JWT authentication\n6. Add database migrations\n7. Write API documentation\n\n**Acceptance Criteria**:\n- All endpoints return correct data format\n- Database relationships work correctly\n- Filtering and pagination work\n- Authentication is secure\n- Code follows Django best practices\n\n### Task 2: Frontend Enhancements (Optional)\n\n**Objective**: Improve the frontend application\n\n**Requirements**:\n1. Add real-time updates using WebSockets\n2. Implement drag-and-drop for task status changes\n3. Add task comments/activity log\n4. Implement advanced filtering (date range, tags)\n5. Add data export functionality\n6. Improve accessibility (ARIA labels, keyboard navigation)\n7. Add unit tests for components\n\n### Task 3: Performance Optimization (Optional)\n\n**Objective**: Optimize application performance\n\n**Requirements**:\n1. Implement virtual scrolling for long task lists\n2. Add request debouncing for search\n3. Optimize React Query cache strategies\n4. Add service worker for offline support\n5. Implement code splitting\n6. Optimize bundle size\n\n## Testing\n\nRun frontend tests:\n```bash\nnpm test\n```\n\n## Environment Variables\n\nCreate a `.env` file:\n```\nVITE_API_URL=http://localhost:8000/api\n```\n\n## Notes\n\n- The frontend is fully functional but requires a backend API\n- All API calls are mocked initially - you need to implement the backend\n- Focus on clean code, proper error handling, and following best practices\n- Document your decisions and trade-offs\n\n## Submission\n\n1. Complete the backend implementation\n2. Ensure all API endpoints work correctly\n3. Test the full application flow\n4. Document any assumptions or limitations\n5. Provide setup instructions for the backend\n"
+  },
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Build Django REST API Backend",
+      "description": "Create a complete Django backend with PostgreSQL database to power the TaskFlow frontend application.",
+      "requirements": [
+        "Set up Django project with PostgreSQL database connection",
+        "Create User, Project, and Task models with proper relationships",
+        "Implement REST API endpoints for all CRUD operations",
+        "Add JWT authentication middleware",
+        "Implement filtering, pagination, and search functionality",
+        "Add proper error handling and validation",
+        "Create database migrations and seed initial data",
+        "Write API documentation (OpenAPI/Swagger)"
+      ],
+      "estimatedTime": "2-3 hours",
+      "difficulty": "medium",
+      "skills": [
+        "Django",
+        "PostgreSQL",
+        "REST API",
+        "Database Design",
+        "Authentication"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Database Schema Design",
+      "description": "Design and implement an efficient database schema for the task management system.",
+      "requirements": [
+        "Design normalized database schema",
+        "Add proper indexes for performance",
+        "Implement foreign key relationships",
+        "Add database constraints (unique, check, etc.)",
+        "Create seed data script",
+        "Document schema decisions"
+      ],
+      "estimatedTime": "1 hour",
+      "difficulty": "medium",
+      "skills": [
+        "Database Design",
+        "PostgreSQL",
+        "SQL"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Frontend API Integration",
+      "description": "Ensure the frontend correctly integrates with your backend API.",
+      "requirements": [
+        "Update API client to match your backend endpoints",
+        "Handle loading and error states properly",
+        "Implement optimistic updates",
+        "Add proper error messages for users",
+        "Test all CRUD operations",
+        "Handle edge cases (empty states, network errors)"
+      ],
+      "estimatedTime": "30 minutes",
+      "difficulty": "easy",
+      "skills": [
+        "React",
+        "API Integration",
+        "Error Handling"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Advanced Features (Optional)",
+      "description": "Add advanced features to demonstrate deeper skills.",
+      "requirements": [
+        "Implement real-time task updates (WebSockets)",
+        "Add task comments/activity feed",
+        "Implement advanced filtering and sorting",
+        "Add data export (CSV/JSON)",
+        "Implement drag-and-drop for task reordering",
+        "Add unit and integration tests"
+      ],
+      "estimatedTime": "2 hours",
+      "difficulty": "hard",
+      "skills": [
+        "WebSockets",
+        "Testing",
+        "Advanced React",
+        "Performance"
+      ]
+    }
+  ],
+  "databaseRequirements": {
+    "type": "PostgreSQL",
+    "models": [
+      {
+        "name": "User",
+        "fields": [
+          "id (UUID, Primary Key)",
+          "email (String, Unique, Required)",
+          "name (String, Required)",
+          "password_hash (String, Required)",
+          "created_at (DateTime)",
+          "updated_at (DateTime)"
+        ]
+      },
+      {
+        "name": "Project",
+        "fields": [
+          "id (UUID, Primary Key)",
+          "name (String, Required)",
+          "description (Text, Optional)",
+          "color (String, Hex Color)",
+          "owner_id (Foreign Key -> User)",
+          "created_at (DateTime)",
+          "updated_at (DateTime)"
+        ],
+        "relationships": [
+          "owner -> User (Many-to-One)"
+        ]
+      },
+      {
+        "name": "Task",
+        "fields": [
+          "id (UUID, Primary Key)",
+          "title (String, Required)",
+          "description (Text, Optional)",
+          "status (Enum: todo, in_progress, in_review, done)",
+          "priority (Enum: low, medium, high)",
+          "due_date (DateTime, Optional)",
+          "project_id (Foreign Key -> Project)",
+          "assignee_id (Foreign Key -> User, Optional)",
+          "tags (Array/String, Optional)",
+          "estimated_hours (Integer, Optional)",
+          "actual_hours (Integer, Optional)",
+          "created_at (DateTime)",
+          "updated_at (DateTime)"
+        ],
+        "relationships": [
+          "project -> Project (Many-to-One)",
+          "assignee -> User (Many-to-One, Optional)"
+        ],
+        "indexes": [
+          "status",
+          "priority",
+          "project_id",
+          "assignee_id",
+          "due_date"
+        ]
+      }
+    ],
+    "migrations": "Required - Create Django migrations for all models"
+  },
+  "apiEndpoints": {
+    "baseUrl": "http://localhost:8000/api",
+    "authentication": "JWT Bearer Token",
+    "endpoints": [
+      {
+        "path": "/tasks/",
+        "methods": [
+          "GET",
+          "POST"
+        ],
+        "description": "List all tasks (with filtering) or create new task",
+        "queryParams": [
+          "status",
+          "priority",
+          "project",
+          "assignee",
+          "search",
+          "page",
+          "page_size"
+        ],
+        "requestBody": "Task object (for POST)",
+        "response": "PaginatedResponse<Task>"
+      },
+      {
+        "path": "/tasks/{id}/",
+        "methods": [
+          "GET",
+          "PATCH",
+          "DELETE"
+        ],
+        "description": "Get, update, or delete specific task",
+        "response": "ApiResponse<Task>"
+      },
+      {
+        "path": "/projects/",
+        "methods": [
+          "GET",
+          "POST"
+        ],
+        "description": "List all projects or create new project",
+        "response": "ApiResponse<Project[]>"
+      },
+      {
+        "path": "/projects/{id}/",
+        "methods": [
+          "GET",
+          "PATCH",
+          "DELETE"
+        ],
+        "description": "Get, update, or delete specific project",
+        "response": "ApiResponse<Project>"
+      },
+      {
+        "path": "/users/me/",
+        "methods": [
+          "GET"
+        ],
+        "description": "Get current authenticated user",
+        "response": "ApiResponse<User>"
+      },
+      {
+        "path": "/users/",
+        "methods": [
+          "GET"
+        ],
+        "description": "List all users (for assignee selection)",
+        "response": "ApiResponse<User[]>"
+      }
+    ]
+  },
+  "setupInstructions": {
+    "frontend": [
+      "npm install",
+      "npm run dev"
+    ],
+    "backend": [
+      "pip install django djangorestframework psycopg2-binary django-cors-headers djangorestframework-simplejwt",
+      "python manage.py migrate",
+      "python manage.py createsuperuser",
+      "python manage.py runserver"
+    ]
+  }
+}

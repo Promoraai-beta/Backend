@@ -302,7 +302,7 @@ router.post('/:token/accept', apiLimiter, async (req: Request, res: Response) =>
           });
 
           // Generate JWT token
-          const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+          const JWT_SECRET = process.env.JWT_SECRET || 'development-secret-key-change-in-production';
           const tokenJWT = jwt.sign(
             { userId: result.id, email: result.email, role: result.role },
             JWT_SECRET,

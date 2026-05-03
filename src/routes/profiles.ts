@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import { logger } from '../lib/logger';
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET || 'development-secret-key-change-in-production';
 
 // Middleware to verify JWT token
 const authenticateToken = (req: Request, res: Response, next: any) => {

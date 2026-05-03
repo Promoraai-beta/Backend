@@ -216,12 +216,20 @@ router.post('/login', authLimiter, validateEmail, handleValidationErrors, async 
   }
 });
 
-// Get current user (requires authentication)
+// Get current user
 router.get('/me', async (req: Request, res: Response) => {
   try {
     const token = req.headers.authorization?.replace('Bearer ', '');
 
+    // In development, allow anonymous access so local testing (e.g. /test-container)
+    // doesn't break when no JWT is present.
     if (!token) {
+      if (process.env.NODE_ENV !== 'production') {
+        return res.json({
+          success: true,
+          data: null
+        });
+      }
       return res.status(401).json({
         success: false,
         error: 'Authentication required'

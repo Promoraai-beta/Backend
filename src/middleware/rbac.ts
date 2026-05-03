@@ -3,7 +3,7 @@ import * as jwt from 'jsonwebtoken';
 import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET || 'development-secret-key-change-in-production';
 
 // Extend Request type to include user info
 declare global {

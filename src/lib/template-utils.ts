@@ -17,6 +17,8 @@ export interface TemplateLookupParams {
   role?: string;
   techStack?: string[] | string;
   level?: string;
+  /** When set, appended to the hash to force a unique row (used for variant templates). */
+  variantNonce?: string;
 }
 
 /**
@@ -24,20 +26,22 @@ export interface TemplateLookupParams {
  * This allows us to find existing templates that match the same criteria
  */
 export function generateTemplateHash(params: TemplateLookupParams): string {
-  const { role = '', techStack = [], level = '' } = params;
-  
+  const { role = '', techStack = [], level = '', variantNonce } = params;
+
   // Normalize techStack to array and sort for consistent hashing
-  const stackArray = Array.isArray(techStack) 
-    ? techStack.sort() 
+  const stackArray = Array.isArray(techStack)
+    ? techStack.sort()
     : (typeof techStack === 'string' ? [techStack] : []);
-  
+
   // Create a normalized string for hashing
+  // variantNonce, when present, guarantees a unique hash per variant
   const normalized = JSON.stringify({
     role: (role || '').toLowerCase().trim(),
     techStack: stackArray.map(s => s.toLowerCase().trim()),
-    level: (level || '').toLowerCase().trim()
+    level: (level || '').toLowerCase().trim(),
+    ...(variantNonce ? { variantNonce } : {}),
   });
-  
+
   // Generate SHA-256 hash
   return crypto.createHash('sha256').update(normalized).digest('hex');
 }
@@ -89,10 +93,12 @@ export async function createTemplate(params: {
   webcontainerReady?: boolean;
   buildStatus?: string;
   buildError?: string;
+  /** Pass a nonce to guarantee a unique hash (use for variant templates). */
+  variantNonce?: string;
 }) {
-  const { role, techStack, level, templateSpec, suggestedAssessments, dockerImage, dockerImageBuilt, webcontainerReady, buildStatus, buildError } = params;
-  
-  const templateHash = generateTemplateHash({ role, techStack, level });
+  const { role, techStack, level, templateSpec, suggestedAssessments, dockerImage, dockerImageBuilt, webcontainerReady, buildStatus, buildError, variantNonce } = params;
+
+  const templateHash = generateTemplateHash({ role, techStack, level, variantNonce });
   
   // Normalize techStack
   const stackArray = Array.isArray(techStack) 

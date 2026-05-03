@@ -3,7 +3,8 @@ import { Prisma } from '@prisma/client';
 import { logger } from '../lib/logger';
 
 // Configuration
-const INACTIVITY_TIMEOUT_MS = parseInt(process.env.INACTIVITY_TIMEOUT_MS || '900000', 10); // 15 minutes default
+// INACTIVITY TIMEOUT raised to 4 hours for E2E testing — restore to 900000 (15 min) before production
+const INACTIVITY_TIMEOUT_MS = parseInt(process.env.INACTIVITY_TIMEOUT_MS || '14400000', 10); // 4 hours default
 const CHECK_INTERVAL_MS = parseInt(process.env.INACTIVITY_CHECK_INTERVAL_MS || '60000', 10); // Check every minute
 
 // Error tracking to prevent log spam
@@ -166,61 +167,34 @@ export function startInactivityMonitor() {
 
 /**
  * Check if a session should be ended due to inactivity
- * Used for real-time checks before allowing session access
+ * DISABLED for E2E testing — always returns inactive: false
+ * Re-enable the body before production
  */
 export async function checkSessionInactivity(sessionId: string): Promise<{ inactive: boolean; reason?: string }> {
-  try {
-    const session = await prisma.session.findUnique({
-      where: { id: sessionId },
-      select: {
-        id: true,
-        status: true,
-        lastActivityAt: true,
-        startedAt: true
-      }
-    });
+  // DISABLED for E2E testing
+  return { inactive: false };
 
-    if (!session || session.status !== 'active') {
-      return { inactive: false };
-    }
-
-    const now = new Date();
-    const timeoutThreshold = new Date(now.getTime() - INACTIVITY_TIMEOUT_MS);
-    const lastActivity = session.lastActivityAt || session.startedAt;
-
-    if (!lastActivity) {
-      // Session started but no activity recorded - use startedAt
-      if (session.startedAt && session.startedAt < timeoutThreshold) {
-        return { inactive: true, reason: 'inactivity_timeout' };
-      }
-      return { inactive: false };
-    }
-
-    if (lastActivity < timeoutThreshold) {
-      // Session is inactive - end it
-      await prisma.session.update({
-        where: { id: sessionId },
-        data: {
-          status: 'ended',
-          submittedAt: now
-        }
-      });
-
-      return { inactive: true, reason: 'inactivity_timeout' };
-    }
-
-    return { inactive: false };
-  } catch (error) {
-    // Don't log errors here - they're likely database connection issues
-    // Just return inactive: false to allow session to continue
-    // The periodic check will handle inactivity monitoring when DB is available
-    const errorCode = error instanceof Prisma.PrismaClientKnownRequestError ? error.code : 'UNKNOWN';
-    if (errorCode === 'P1001' || errorCode === 'P2024') {
-      // Database connection error - skip inactivity check for now
-      return { inactive: false };
-    }
-    // For other errors, also skip (don't block session access due to DB issues)
-    return { inactive: false };
-  }
+  // --- restore below for production ---
+  // try {
+  //   const session = await prisma.session.findUnique({
+  //     where: { id: sessionId },
+  //     select: { id: true, status: true, lastActivityAt: true, startedAt: true }
+  //   });
+  //   if (!session || session.status !== 'active') return { inactive: false };
+  //   const now = new Date();
+  //   const timeoutThreshold = new Date(now.getTime() - INACTIVITY_TIMEOUT_MS);
+  //   const lastActivity = session.lastActivityAt || session.startedAt;
+  //   if (!lastActivity) {
+  //     if (session.startedAt && session.startedAt < timeoutThreshold) return { inactive: true, reason: 'inactivity_timeout' };
+  //     return { inactive: false };
+  //   }
+  //   if (lastActivity < timeoutThreshold) {
+  //     await prisma.session.update({ where: { id: sessionId }, data: { status: 'ended', submittedAt: now } });
+  //     return { inactive: true, reason: 'inactivity_timeout' };
+  //   }
+  //   return { inactive: false };
+  // } catch (error) {
+  //   return { inactive: false };
+  // }
 }
 

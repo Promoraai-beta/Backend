@@ -1,0 +1,14 @@
+{
+  "name": "assessment-fullstack",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "concurrently -n f,b -c blue,green \"npm run dev -w frontend\" \"npm run dev -w backend\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

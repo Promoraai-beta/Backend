@@ -106,18 +106,19 @@ function getTransporter(): nodemailer.Transporter | null {
   return null;
 }
 
-export async function sendEmail(options: EmailOptions): Promise<{ success: boolean; error?: string }> {
+export async function sendEmail(
+  options: EmailOptions
+): Promise<{ success: boolean; delivered: boolean; error?: string }> {
   try {
     const emailTransporter = getTransporter();
-    
+
     if (!emailTransporter) {
-      // Email service not configured - log for development
-      logger.log('📧 Email would be sent (email service not configured):', {
+      // No SMTP/SendGrid configured — do not claim email was delivered
+      logger.log('📧 Email skipped (no transporter):', {
         to: options.to,
         subject: options.subject,
-        html: options.html.substring(0, 100) + '...'
       });
-      return { success: true }; // Return success in development mode
+      return { success: true, delivered: false };
     }
 
     const fromEmail = process.env.FROM_EMAIL || process.env.SMTP_USER || 'noreply@promora.ai';
@@ -139,10 +140,10 @@ export async function sendEmail(options: EmailOptions): Promise<{ success: boole
       response: info.response
     });
 
-    return { success: true };
+    return { success: true, delivered: true };
   } catch (error: any) {
     logger.error('❌ Email sending error:', error);
-    return { success: false, error: error.message };
+    return { success: false, delivered: false, error: error.message };
   }
 }
 

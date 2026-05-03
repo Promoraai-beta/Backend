@@ -52,20 +52,67 @@ export async function verifyJobPosting(url: string): Promise<JobVerificationResu
 export async function generateAssessments(
   jobTitle: string,
   company: string,
-  jobDescription: string
+  jobDescription: string,
+  assessmentPreferences?: {
+    components?: string[];
+    ideLanguage?: string;
+    timeLimitMinutes?: number;
+    numTasks?: number;
+    bugTypes?: string[];
+    skills?: string[];
+  }
 ): Promise<AssessmentGenerationResult> {
   try {
     const clientManager = getMCPClientManager();
     const client = await clientManager.getClient('server-a-job-analysis');
-    
+
     const result = await client.callTool('generate_assessments', {
       jobTitle,
       company,
-      jobDescription
+      jobDescription,
+      ...(assessmentPreferences && { assessmentPreferences }),
     });
     return result as AssessmentGenerationResult;
   } catch (error: any) {
     throw new Error(error.message || 'Failed to generate assessments');
+  }
+}
+
+// ── Skills extraction result ───────────────────────────────────────────────
+export interface SkillItem {
+  name: string;
+  category: 'lang' | 'framework' | 'db' | 'cloud' | 'concept';
+}
+
+export interface SkillsExtractionResult {
+  skills: SkillItem[];
+  role: string;
+  level: string;
+  ideLanguage: string;
+  suggestedComponents: string[];
+  suggestedNumTasks: number;
+  suggestedBugTypes: string[];
+}
+
+/**
+ * Extract skills, role, level and assessment config from a job description.
+ * Called before generateAssessments so the recruiter can preview and adjust.
+ */
+export async function extractSkills(
+  jobTitle: string,
+  jobDescription: string,
+): Promise<SkillsExtractionResult> {
+  try {
+    const clientManager = getMCPClientManager();
+    const client = await clientManager.getClient('server-a-job-analysis');
+
+    const result = await client.callTool('extract_skills', {
+      jobTitle,
+      jobDescription,
+    });
+    return result as SkillsExtractionResult;
+  } catch (error: any) {
+    throw new Error(error.message || 'Failed to extract skills');
   }
 }
 

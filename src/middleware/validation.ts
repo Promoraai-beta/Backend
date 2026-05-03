@@ -195,6 +195,27 @@ export const validateAIIntraction = [
     .optional({ values: 'falsy' })
     .isInt({ min: 0 })
     .withMessage('Tokens used must be a non-negative integer'),
+  body('promptTokens')
+    .optional({ values: 'falsy' })
+    .isInt({ min: 0 })
+    .withMessage('Prompt tokens must be a non-negative integer'),
+  body('completionTokens')
+    .optional({ values: 'falsy' })
+    .isInt({ min: 0 })
+    .withMessage('Completion tokens must be a non-negative integer'),
+  body('latencyMs')
+    .optional({ values: 'falsy' })
+    .isInt({ min: 0 })
+    .withMessage('Latency must be a non-negative integer'),
+  body('tabId')
+    .optional({ values: 'falsy' })
+    .isString()
+    .isLength({ max: 100 })
+    .withMessage('Tab ID too long'),
+  body('conversationTurn')
+    .optional({ values: 'falsy' })
+    .isInt({ min: 0 })
+    .withMessage('Conversation turn must be a non-negative integer'),
   // Optional metadata object
   body('metadata')
     .optional()

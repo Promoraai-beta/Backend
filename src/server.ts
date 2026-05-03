@@ -1,8 +1,14 @@
+// Load .env FIRST — before any other imports so module-level code in services
+// (azure-provisioner scheduled cleanup, local-docker-provisioner port config, etc.)
+// reads the correct values. override:true ensures .env wins over shell env vars
+// (prevents local shell vars like LOCAL_DOCKER_HOST=containers from leaking in).
+import dotenv from 'dotenv';
+import path from 'path';
+dotenv.config({ path: path.resolve(__dirname, '..', '.env'), override: true });
+
 import express, { Request, Response } from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import axios from 'axios';
-import path from 'path';
 import http from 'http';
 import { prisma } from './lib/prisma';
 import apiRoutes from './routes';
@@ -11,9 +17,10 @@ import { securityHeaders, enforceTimer } from './middleware/security';
 import { apiLimiter, executeLimiter, codeSaveLimiter, videoUploadLimiter, aiInteractionLimiter, liveMonitoringLimiter, authLimiter, sessionCodeLimiter } from './middleware/rate-limiter';
 import { validateCodeExecution, validateSubmission, validateCodeSave } from './middleware/validation';
 import { startInactivityMonitor } from './services/inactivity-monitor';
+import { startContainerKeepalive } from './services/container-keepalive';
+import { startContainerHealthMonitor } from './services/container-health-monitor';
+import { startContainerCleanup } from './services/container-cleanup';
 import { logger } from './lib/logger';
-
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -40,7 +47,7 @@ app.use(cors({
     if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
       callback(null, true);
     } else {
-      callback(null, true); // In development, allow all origins
+      callback(new Error(`CORS: origin '${origin}' not allowed`));
     }
   },
   credentials: true,
@@ -275,9 +282,10 @@ async function executeJavaScript(code: string, timeoutMs: number = 5000): Promis
     // Execute code with timeout
     const startTime = Date.now();
     
-    // Create a promise that rejects after timeout
+    // Create a promise that rejects after timeout; keep handle so we can clear it
+    let timeoutHandle: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => {
+      timeoutHandle = setTimeout(() => {
         timedOut = true;
         reject(new Error('Execution timeout'));
       }, timeoutMs);
@@ -296,8 +304,10 @@ async function executeJavaScript(code: string, timeoutMs: number = 5000): Promis
       }
     });
 
-    // Race between execution and timeout
-    await Promise.race([executionPromise, timeoutPromise]);
+    // Race between execution and timeout; clear the timer whenever execution wins
+    await Promise.race([executionPromise, timeoutPromise]).finally(() => {
+      clearTimeout(timeoutHandle);
+    });
 
     // Restore console
     console.log = originalLog;
@@ -557,12 +567,13 @@ app.post('/api/submit', enforceTimer, validateSubmission, async (req: Request, r
 
         submissionId = submission.id;
 
-        // Update session status to 'submitted' (atomic)
+        // Update session status to 'submitted' and save finalCode (atomic)
         await tx.session.update({
           where: { id: sessionId },
           data: {
             status: 'submitted',
-            submittedAt: new Date()
+            submittedAt: new Date(),
+            finalCode: code.substring(0, 5_000_000), // Save submitted code
           }
         });
       }
@@ -638,5 +649,19 @@ server.listen(PORT, () => {
   
   // Start inactivity monitoring service
   startInactivityMonitor();
+
+  // Start container keep-alive service (Azure only)
+  // Periodically pings pre-provisioned containers and re-provisions dead ones
+  // so candidates always get an immediately-live IDE — no 45-second wait.
+  startContainerKeepalive();
+
+  // Start container health monitor (runs every hour, both Azure and local Docker)
+  // Finds any sessions where initial provisioning failed at invite time and repairs them.
+  // Complements the keep-alive: keep-alive = probes live containers; health monitor = fixes never-provisioned ones.
+  startContainerHealthMonitor();
+
+  // Start container cleanup service (runs every 6 hours, Azure only)
+  // Deletes stale/old containers in parallel and syncs DB container references.
+  startContainerCleanup();
 });
 

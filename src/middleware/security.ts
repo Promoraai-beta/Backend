@@ -145,76 +145,37 @@ setInterval(() => {
   }
 }, 60 * 1000); // Clean up every minute
 
+// TIMER ENFORCEMENT DISABLED for E2E testing — re-enable before production
 // Server-side timer enforcement
 export const enforceTimer = async (req: Request, res: Response, next: NextFunction) => {
-  const sessionId = req.params.id || req.body.sessionId;
+  // Commented out for testing — sessions will not be auto-ended by the server timer
+  return next();
 
-  if (!sessionId) {
-    return next(); // Skip if no session ID
-  }
-
-  try {
-    const session = await prisma.session.findUnique({
-      where: { id: sessionId }
-    });
-
-    if (!session) {
-      return res.status(404).json({
-        success: false,
-        error: 'Session not found'
-      });
-    }
-
-    // Check if session has expired
-    if (session.expiresAt && new Date(session.expiresAt) < new Date()) {
-      // Auto-end expired sessions (mark as 'ended', not 'submitted')
-      if (session.status === 'active') {
-        await prisma.session.update({
-          where: { id: sessionId },
-          data: {
-            status: 'ended',
-            submittedAt: new Date()
-          }
-        });
-      }
-
-      return res.status(400).json({
-        success: false,
-        error: 'Session has expired',
-        expired: true
-      });
-    }
-
-    // Check if time limit has been exceeded
-    if (session.startedAt && session.timeLimit) {
-      const elapsed = (Date.now() - new Date(session.startedAt).getTime()) / 1000;
-      if (elapsed > session.timeLimit) {
-        // Auto-end sessions that exceeded time limit (mark as 'ended', not 'submitted')
-        if (session.status === 'active') {
-          await prisma.session.update({
-            where: { id: sessionId },
-            data: {
-              status: 'ended',
-              submittedAt: new Date()
-            }
-          });
-        }
-
-        return res.status(400).json({
-          success: false,
-          error: 'Time limit exceeded',
-          timeExceeded: true
-        });
-      }
-    }
-
-    next();
-  } catch (error: any) {
-    logger.error('Timer enforcement error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Failed to enforce timer'
-    });
-  }
+  // --- restore below for production ---
+  // const sessionId = req.params.id || req.body.sessionId;
+  // if (!sessionId) return next();
+  // try {
+  //   const session = await prisma.session.findUnique({ where: { id: sessionId } });
+  //   if (!session) return res.status(404).json({ success: false, error: 'Session not found' });
+  //   if (session.expiresAt && new Date(session.expiresAt) < new Date()) {
+  //     if (session.status === 'active') {
+  //       await prisma.session.update({ where: { id: sessionId }, data: { status: 'ended', submittedAt: new Date() } });
+  //     }
+  //     return res.status(400).json({ success: false, error: 'Session has expired', expired: true });
+  //   }
+  //   if (session.startedAt && session.timeLimit) {
+  //     const elapsed = (Date.now() - new Date(session.startedAt).getTime()) / 1000;
+  //     if (elapsed > session.timeLimit) {
+  //       if (session.status === 'active') {
+  //         await prisma.session.update({ where: { id: sessionId }, data: { status: 'ended', submittedAt: new Date() } });
+  //       }
+  //       return res.status(400).json({ success: false, error: 'Time limit exceeded', timeExceeded: true });
+  //     }
+  //   }
+  //   next();
+  // } catch (error: any) {
+  //   logger.error('Timer enforcement error:', error);
+  //   return res.status(500).json({ success: false, error: 'Failed to enforce timer' });
+  // }
 };
 

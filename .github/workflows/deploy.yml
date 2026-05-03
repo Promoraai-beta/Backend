@@ -64,11 +64,11 @@ jobs:
             fi
           fi
           if [ "$SERVICE" = "mcp" ] || [ "$SERVICE" = "all" ]; then
-            if [ -d "MCP-Servers/.git" ]; then
-              cd MCP-Servers && git pull origin main 2>/dev/null || git pull origin master 2>/dev/null || true
+            if [ -d "mcp-servers/.git" ]; then
+              cd mcp-servers && git pull origin main 2>/dev/null || git pull origin master 2>/dev/null || true
               cd ..
             else
-              echo "⚠️  MCP-Servers is not a git repository - rebuilding from existing files"
+              echo "⚠️  mcp-servers is not a git repository - rebuilding from existing files"
             fi
           fi
           set -e

@@ -5,7 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import { createClient } from '@supabase/supabase-js';
 import { updateHLSPlaylist, getHLSPlaylistUrl } from '../lib/hls';
-import { buildVideoChunkPath, sanitizeName } from '../lib/storage-utils';
+import { sanitizeName } from '../lib/storage-utils';
 import { logger } from '../lib/logger';
 
 const router = Router();
@@ -31,6 +31,45 @@ const upload = multer({
     fileSize: 100 * 1024 * 1024 // 100MB limit
   }
 });
+
+/**
+ * Auto-create the Supabase storage bucket if it doesn't exist.
+ * Runs at startup so uploads never fail with "Bucket not found".
+ */
+async function ensureStorageBucket() {
+  if (!supabase) {
+    logger.warn('⚠️ Supabase not configured — skipping bucket check');
+    return;
+  }
+  const bucket = process.env.SUPABASE_STORAGE_BUCKET || 'video';
+  try {
+    const { data: buckets, error: listError } = await supabase.storage.listBuckets();
+    if (listError) {
+      logger.error('Failed to list Supabase buckets:', listError.message);
+      return;
+    }
+    const exists = buckets?.some((b: { name: string }) => b.name === bucket);
+    if (!exists) {
+      logger.log(`📦 Supabase bucket "${bucket}" not found — creating it...`);
+      const { error: createError } = await supabase.storage.createBucket(bucket, {
+        public: true,                         // Public so getPublicUrl works
+        fileSizeLimit: 100 * 1024 * 1024,    // 100 MB per file
+      });
+      if (createError) {
+        logger.error(`❌ Failed to create storage bucket "${bucket}":`, createError.message);
+      } else {
+        logger.log(`✅ Created Supabase storage bucket: "${bucket}"`);
+      }
+    } else {
+      logger.log(`✅ Supabase storage bucket "${bucket}" already exists`);
+    }
+  } catch (err) {
+    logger.error('Error checking/creating Supabase storage bucket:', err);
+  }
+}
+
+// Run immediately when this module is loaded (backend startup)
+ensureStorageBucket();
 
 /**
  * POST /api/video/upload
@@ -310,53 +349,15 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
       });
     }
     
-    logger.log(`📁 Building path for ${streamType} chunk ${chunkIndex}:`);
-    logger.log(`   companies/${companyName}/jobs/${jobName}/${candidateName}/${streamTypeForPath}/`);
+    // Build deterministic file path (no timestamp) so re-uploads overwrite cleanly
+    // Path: companies/{company}/jobs/{job}/{candidate}/{streamType}/chunk_{index}.webm
+    const sanitizedCompany = sanitizeName(companyName);
+    const sanitizedJob = sanitizeName(jobName);
+    const sanitizedCandidate = sanitizeName(candidateName);
+    const filePath = `companies/${sanitizedCompany}/jobs/${sanitizedJob}/${sanitizedCandidate}/${streamTypeForPath}/chunk_${chunkIndex}.webm`;
 
-    // ✅ CRITICAL: Check if a chunk with the same chunkIndex and streamType already exists
-    // If it does, we need to delete the old file to avoid duplicates
-    const existingChunk = await prisma.videoChunk.findFirst({
-      where: {
-        sessionId,
-        chunkIndex,
-        streamType: streamTypeForPath
-      }
-    });
+    logger.log(`📁 Uploading ${streamType} chunk ${chunkIndex} → ${filePath}`);
 
-    let oldFilePath: string | null = null;
-    if (existingChunk) {
-      logger.log(`⚠️ Found existing chunk ${chunkIndex} (${streamTypeForPath}) for session ${sessionId}`);
-      logger.log(`   Old URL: ${existingChunk.url}`);
-      
-      // Extract the file path from the URL
-      // URL format: https://{supabase-url}/storage/v1/object/public/{bucket}/{path}
-      const urlParts = existingChunk.url.split('/storage/v1/object/public/');
-      if (urlParts.length > 1) {
-        const pathWithBucket = urlParts[1]; // e.g., "video/companies/..."
-        const pathParts = pathWithBucket.split('/');
-        if (pathParts.length > 1) {
-          // Remove the bucket name (first part) and join the rest
-          oldFilePath = pathParts.slice(1).join('/');
-          logger.log(`   Old file path: ${oldFilePath}`);
-        }
-      }
-    }
-
-    // Build file path using new folder structure
-    const timestamp = Date.now();
-    const filePath = buildVideoChunkPath(
-      companyName,
-      jobName,
-      candidateName,
-      streamTypeForPath,
-      chunkIndex,
-      timestamp
-    );
-    
-    let url: string = '';
-    let sizeBytes: bigint = BigInt(0);
-
-    // Use ONLY Supabase - no local storage fallback
     if (!supabase) {
       return res.status(500).json({
         success: false,
@@ -364,52 +365,28 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
       });
     }
 
+    let url: string = '';
+
     try {
-      // Use "video" as the default bucket name
       const bucket = process.env.SUPABASE_STORAGE_BUCKET || 'video';
 
-      // ✅ Delete old file if it exists (to prevent duplicates)
-      // Note: We'll delete the database record after successful upload
-      if (oldFilePath && existingChunk) {
-        try {
-          logger.log(`🗑️ Deleting old chunk file: ${oldFilePath}`);
-          const { error: deleteError } = await supabase.storage
-            .from(bucket)
-            .remove([oldFilePath]);
-          
-          if (deleteError) {
-            logger.warn(`⚠️ Failed to delete old file ${oldFilePath}:`, deleteError);
-            // Continue with upload even if delete fails - we'll handle cleanup later
-          } else {
-            logger.log(`✅ Deleted old chunk file: ${oldFilePath}`);
-          }
-        } catch (deleteError) {
-          logger.warn(`⚠️ Error deleting old file:`, deleteError);
-          // Continue with upload
-        }
-      }
-
-      logger.log(`Uploading to Supabase: ${filePath} (${file.size} bytes)`);
-      logger.log(`📁 New folder structure: companies/{company}/jobs/{job}/{candidate}/{streamType}/`);
-      
-      // Retry logic for Supabase upload
+      // Retry logic with upsert:true so re-uploads overwrite without needing to delete first
       let uploadSuccess = false;
       let lastError: any = null;
       const maxRetries = 3;
-      
+
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
           if (attempt > 1) {
             logger.log(`Retry attempt ${attempt}/${maxRetries} for ${filePath}`);
             await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
           }
-          
-          // Upload to Supabase Storage with new folder structure
-          const { data, error } = await supabase.storage
+
+          const { error } = await supabase.storage
             .from(bucket)
             .upload(filePath, file.buffer, {
               contentType: 'video/webm',
-              upsert: false
+              upsert: true  // Overwrite if same chunk re-uploaded — no stale duplicates
             });
 
           if (error) {
@@ -417,15 +394,13 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
             throw error;
           }
 
-          // Get public URL
           const { data: urlData } = supabase.storage
             .from(bucket)
             .getPublicUrl(filePath);
 
           url = urlData.publicUrl;
-          sizeBytes = BigInt(file.size);
           uploadSuccess = true;
-          logger.log(`✅ Supabase upload successful: ${filePath}`);
+          logger.log(`✅ Uploaded chunk ${chunkIndex} (${streamType}): ${filePath}`);
           break;
         } catch (retryError: any) {
           lastError = retryError;
@@ -433,8 +408,6 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
       }
 
       if (!uploadSuccess) {
-        logger.error('All retry attempts failed for:', filePath);
-        logger.error('Last error:', lastError);
         throw lastError || new Error('Upload failed after retries');
       }
 
@@ -446,87 +419,17 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
       });
     }
 
-    // Save metadata to database (required for HLS playlist generation)
-    // The actual video file is stored in Supabase bucket
-    // Database table is essential for:
-    // - HLS playlist generation (needs ordered chunks by chunkIndex)
-    // - Fast queries (avoid listing Supabase files on every playlist update)
-    // - Tracking which chunks belong to which session
-    // - Calculating storage usage and analytics
-    // - Debugging missing chunks
-    // 
-    // IMPORTANT: If DB write fails, we still return success since file is in Supabase
-    // The chunk will be missing from playlists until manually synced, but file is safe
-    let videoChunk = null;
-    try {
-      // ✅ CRITICAL: Verify streamType matches URL path before saving
-      const urlContainsStreamType = url.includes(`/${streamType}/`);
-      if (!urlContainsStreamType) {
-        logger.error(`❌ CRITICAL: URL path mismatch! streamType="${streamType}" but URL="${url.substring(0, 100)}..."`);
-        logger.error(`Expected URL to contain "/${streamType}/" but it doesn't!`);
-        logger.error(`This is a critical error - the chunk will be saved with incorrect streamType!`);
-        // Don't fail upload, but log the error - this should never happen if code is correct
-      } else {
-        logger.log(`✅ URL path verification passed: URL contains "/${streamType}/"`);
-      }
-      
-      logger.log(`📤 Uploading to: ${url.substring(Math.max(0, url.length - 80))}`);
-      
-      videoChunk = await prisma.videoChunk.create({
-        data: {
-          sessionId,
-          chunkIndex: chunkIndex, // Already an integer from parsing above
-          streamType: streamType, // ✅ Save validated streamType ('webcam' | 'screenshare')
-          url,
-          sizeBytes
-        }
-      });
-      
-      // ✅ Delete old database record if it existed (now that new one is saved)
-      if (existingChunk && existingChunk.id !== videoChunk.id) {
-        try {
-          await prisma.videoChunk.delete({
-            where: { id: existingChunk.id }
-          });
-          logger.log(`✅ Deleted old chunk record from database (id: ${existingChunk.id})`);
-        } catch (dbDeleteError) {
-          logger.warn(`⚠️ Failed to delete old chunk from database:`, dbDeleteError);
-          // Not critical - old record will just be orphaned
-        }
-      }
-      
-      // ✅ Verify what was saved
-      logger.log(`✅ Saved ${streamType} chunk ${chunkIndex} to database`);
-      logger.log(`   URL: ${url.substring(Math.max(0, url.length - 80))}`);
-      logger.log(`   Size: ${file.size} bytes`);
-    } catch (dbError: any) {
-      // Log error but don't fail the upload - file is already in Supabase
-      // This ensures we don't lose video data even if DB write fails
-      logger.error(`Failed to save chunk metadata to database (chunk ${chunkIndex}):`, dbError);
-      // Continue - file is in Supabase, DB metadata can be synced later if needed
-    }
+    // No DB write needed — S3 is the single source of truth.
+    // The GET route lists chunks directly from Supabase Storage.
 
-    // Update HLS playlist in background (don't wait for it)
-    // Only updates if DB write succeeded (chunk exists in DB)
-    if (videoChunk) {
-      updateHLSPlaylist(sessionId).catch(err => {
-        logger.error('Failed to update HLS playlist:', err);
-      });
-    }
-
-    // Return response with chunk data (or basic info if DB write failed)
     res.json({
       success: true,
-      data: videoChunk ? {
-        ...videoChunk,
-        sizeBytes: Number(videoChunk.sizeBytes) // Convert BigInt to Number for JSON
-      } : {
+      data: {
         sessionId,
         chunkIndex,
+        streamType,
         url,
-        sizeBytes: Number(sizeBytes),
-        // Note: Not in database, but file is in Supabase
-        metadataSaved: false
+        sizeBytes: file.size,
       },
       message: 'Video chunk uploaded successfully'
     });
@@ -549,156 +452,88 @@ router.post('/upload', videoUploadLimiter, upload.single('video'), validateVideo
 router.get('/:sessionId', async (req: Request, res: Response) => {
   try {
     const { sessionId } = req.params;
-    const { streamType } = req.query; // Optional filter by stream type
+    const { streamType } = req.query;
 
-    logger.log(`\n📥 GET /api/video/${sessionId}${streamType ? `?streamType=${streamType}` : ''}`);
+    logger.log(`\n📥 GET /api/video/${sessionId}`);
 
-    // ✅ CRITICAL: Fetch webcam and screenshare separately for better validation
+    if (!supabase) {
+      return res.status(500).json({ success: false, error: 'Supabase storage not configured' });
+    }
+
+    // Look up session to reconstruct the S3 folder path
+    const session = await prisma.session.findUnique({
+      where: { id: sessionId },
+      include: { assessment: { include: { company: true } } }
+    });
+
+    if (!session) {
+      return res.status(404).json({ success: false, error: 'Session not found' });
+    }
+
+    const companyName = session.assessment?.company?.name || 'UnknownCompany';
+    const jobName = session.assessment?.jobTitle || session.assessment?.role || 'UnknownJob';
+    const candidateName = session.candidateName || session.sessionCode || 'UnknownCandidate';
+
+    const sanitizedCompany = sanitizeName(companyName);
+    const sanitizedJob = sanitizeName(jobName);
+    const sanitizedCandidate = sanitizeName(candidateName);
+    const bucket = process.env.SUPABASE_STORAGE_BUCKET || 'video';
+
+    /**
+     * List chunks for one stream type directly from Supabase Storage.
+     * Files are named chunk_0.webm, chunk_1.webm, … so we parse the index
+     * from the filename and sort numerically.
+     */
+    const listChunks = async (st: 'webcam' | 'screenshare') => {
+      const prefix = `companies/${sanitizedCompany}/jobs/${sanitizedJob}/${sanitizedCandidate}/${st}`;
+      const { data: files, error } = await supabase!.storage
+        .from(bucket)
+        .list(prefix, { limit: 2000, sortBy: { column: 'name', order: 'asc' } });
+
+      if (error || !files) {
+        logger.warn(`⚠️ Could not list ${st} chunks: ${error?.message}`);
+        return [];
+      }
+
+      return files
+        .filter(f => f.name.endsWith('.webm'))
+        .map(f => {
+          // Supports both naming conventions:
+          //   chunk_0.webm          (new — deterministic)
+          //   chunk_0_1712345.webm  (old — with timestamp)
+          const match = f.name.match(/^chunk_(\d+)(?:_\d+)?\.webm$/);
+          const chunkIndex = match ? parseInt(match[1], 10) : -1;
+          const filePath = `${prefix}/${f.name}`;
+          const { data: urlData } = supabase!.storage.from(bucket).getPublicUrl(filePath);
+          return {
+            chunkIndex,
+            streamType: st,
+            url: urlData.publicUrl,
+            sizeBytes: f.metadata?.size ?? 0,
+          };
+        })
+        .filter(c => c.chunkIndex >= 0)
+        .sort((a, b) => a.chunkIndex - b.chunkIndex);
+    };
+
     const [webcamChunks, screenshareChunks] = await Promise.all([
-      prisma.videoChunk.findMany({
-        where: {
-          sessionId,
-          streamType: 'webcam'
-        },
-        orderBy: { chunkIndex: 'asc' }
-      }),
-      prisma.videoChunk.findMany({
-        where: {
-          sessionId,
-          streamType: 'screenshare'
-        },
-        orderBy: { chunkIndex: 'asc' }
-      })
+      streamType === 'screenshare' ? [] : listChunks('webcam'),
+      streamType === 'webcam'      ? [] : listChunks('screenshare'),
     ]);
 
     logger.log(`📊 Found ${webcamChunks.length} webcam chunks, ${screenshareChunks.length} screenshare chunks`);
 
-    // ✅ CRITICAL: Verify and fix URLs to match streamType
-    const webcamMismatches: any[] = [];
-    const correctedWebcamChunks = webcamChunks.map(chunk => {
-      if (!chunk.url.includes('/webcam/')) {
-        webcamMismatches.push({
-          chunkId: chunk.id,
-          chunkIndex: chunk.chunkIndex,
-          streamType: chunk.streamType,
-          url: chunk.url
-        });
-        // Fix URL by replacing wrong path segment
-        // NOTE: This is a best-effort correction. The corrected URL may not exist.
-        // The frontend will handle 404 errors gracefully by skipping missing files
-        let correctedUrl = chunk.url;
-        if (chunk.url.includes('/screenshare/')) {
-          correctedUrl = chunk.url.replace('/screenshare/', '/webcam/');
-          logger.warn(`⚠️ Fixing webcam chunk ${chunk.chunkIndex} URL: replacing /screenshare/ with /webcam/`);
-          logger.warn(`   ⚠️ WARNING: Corrected URL may not exist if file has different timestamp or location`);
-        }
-        return { ...chunk, url: correctedUrl };
-      }
-      return chunk;
-    });
-
-    // ✅ CRITICAL: Verify and fix URLs to match streamType for screenshare chunks
-    const screenshareMismatches: any[] = [];
-    const correctedScreenshareChunks = screenshareChunks.map(chunk => {
-      if (!chunk.url.includes('/screenshare/')) {
-        screenshareMismatches.push({
-          chunkId: chunk.id,
-          chunkIndex: chunk.chunkIndex,
-          streamType: chunk.streamType,
-          url: chunk.url
-        });
-        // Fix URL by replacing wrong path segment
-        // NOTE: This is a best-effort correction. The corrected URL may not exist if:
-        // - The file was uploaded with a different timestamp
-        // - The file is stored in a different location
-        // - The database has stale/inconsistent data
-        // The frontend will handle 404 errors gracefully by skipping missing files
-        let correctedUrl = chunk.url;
-        if (chunk.url.includes('/webcam/')) {
-          correctedUrl = chunk.url.replace('/webcam/', '/screenshare/');
-          logger.warn(`⚠️ Fixing screenshare chunk ${chunk.chunkIndex} URL: replacing /webcam/ with /screenshare/`);
-          logger.warn(`   Original: ${chunk.url.substring(Math.max(0, chunk.url.length - 80))}`);
-          logger.warn(`   Corrected: ${correctedUrl.substring(Math.max(0, correctedUrl.length - 80))}`);
-          logger.warn(`   ⚠️ WARNING: Corrected URL may not exist if file has different timestamp or location`);
-          logger.warn(`   ⚠️ Frontend will skip missing files and continue with available chunks`);
-        }
-        return { ...chunk, url: correctedUrl };
-      }
-      return chunk;
-    });
-
-    // Log mismatches
-    if (webcamMismatches.length > 0) {
-      logger.error(`❌ Found ${webcamMismatches.length} webcam chunks with WRONG URL paths:`);
-      webcamMismatches.forEach(m => {
-        logger.error(`  Chunk ${m.chunkIndex}: DB streamType="${m.streamType}" but URL="${m.url.substring(0, 100)}..."`);
-      });
-    }
-
-    if (screenshareMismatches.length > 0) {
-      logger.error(`❌ Found ${screenshareMismatches.length} screenshare chunks with WRONG URL paths:`);
-      screenshareMismatches.forEach(m => {
-        logger.error(`  Chunk ${m.chunkIndex}: DB streamType="${m.streamType}" but URL="${m.url.substring(0, 100)}..."`);
-      });
-    }
-
-    // Log first few chunks of each type for debugging
-    if (correctedWebcamChunks.length > 0) {
-      logger.log(`\n✅ WEBCAM CHUNKS (first 3):`);
-      correctedWebcamChunks.slice(0, 3).forEach(chunk => {
-        const urlSnippet = chunk.url.substring(Math.max(0, chunk.url.length - 60));
-        const urlMatch = chunk.url.includes('/webcam/') ? '✓' : '❌';
-        logger.log(`  Chunk ${chunk.chunkIndex}: ${urlMatch} ${urlSnippet}`);
-      });
-    }
-
-    if (correctedScreenshareChunks.length > 0) {
-      logger.log(`\n✅ SCREENSHARE CHUNKS (first 3):`);
-      correctedScreenshareChunks.slice(0, 3).forEach(chunk => {
-        const urlSnippet = chunk.url.substring(Math.max(0, chunk.url.length - 60));
-        const urlMatch = chunk.url.includes('/screenshare/') ? '✓' : '❌';
-        logger.log(`  Chunk ${chunk.chunkIndex}: ${urlMatch} ${urlSnippet}`);
-      });
-    }
-
-    // ✅ Filter chunks by streamType if requested
-    let filteredWebcam = correctedWebcamChunks;
-    let filteredScreenshare = correctedScreenshareChunks;
-
-    if (streamType === 'webcam') {
-      filteredScreenshare = [];
-    } else if (streamType === 'screenshare') {
-      filteredWebcam = [];
-    }
-
-    // Return grouped data structure
     res.json({
       success: true,
-      data: {
-        webcam: filteredWebcam.map(chunk => ({
-          ...chunk,
-          sizeBytes: Number(chunk.sizeBytes) // Convert BigInt to Number for JSON
-        })),
-        screenshare: filteredScreenshare.map(chunk => ({
-          ...chunk,
-          sizeBytes: Number(chunk.sizeBytes) // Convert BigInt to Number for JSON
-        }))
-      },
+      data: { webcam: webcamChunks, screenshare: screenshareChunks },
       hlsUrl: getHLSPlaylistUrl(sessionId),
-      streamType: streamType || 'all', // Return which stream type was requested
-      // Include mismatch warnings in response for debugging
-      warnings: {
-        webcamMismatches: webcamMismatches.length,
-        screenshareMismatches: screenshareMismatches.length
-      }
+      streamType: streamType || 'all',
+      warnings: { webcamMismatches: 0, screenshareMismatches: 0 }
     });
 
   } catch (error: any) {
     logger.error('Error fetching video chunks:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

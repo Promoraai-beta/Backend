@@ -16,6 +16,26 @@ import * as fs from 'fs';
 import Docker from 'dockerode';
 import { logger } from '../lib/logger';
 
+/**
+ * Read a .env file and return its key=value pairs as a plain object.
+ * Does NOT modify process.env — just parses the file.
+ */
+function readDotEnv(envFilePath: string): Record<string, string> {
+  if (!fs.existsSync(envFilePath)) return {};
+  const vars: Record<string, string> = {};
+  const lines = fs.readFileSync(envFilePath, 'utf8').split('\n');
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eqIdx = line.indexOf('=');
+    if (eqIdx < 0) continue;
+    const key = line.slice(0, eqIdx).trim();
+    const val = line.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
+    if (key) vars[key] = val;
+  }
+  return vars;
+}
+
 interface MCPTool {
   name: string;
   description: string;
@@ -191,10 +211,18 @@ export class MCPClient extends EventEmitter {
       const venvPython = path.join(serverDir, '..', 'venv', 'bin', 'python');
       const pythonExec = fs.existsSync(venvPython) ? venvPython : 'python3';
       
-      // Spawn Python process
+      // Load the MCP server's own .env so its Azure credentials always win
+      // over anything the backend process.env might have (e.g. a different OPENAI_API_KEY)
+      const serverEnvFile = path.join(serverDir, '..', '.env');
+      const serverEnvVars = readDotEnv(serverEnvFile);
+      if (Object.keys(serverEnvVars).length > 0) {
+        logger.log(`[MCP Client] Loaded ${Object.keys(serverEnvVars).length} vars from ${serverEnvFile}`);
+      }
+
+      // Spawn Python process — server .env vars override backend process.env
       this.process = spawn(pythonExec, [this.serverPath], {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, PYTHONUNBUFFERED: '1' }
+        env: { ...process.env, PYTHONUNBUFFERED: '1', ...serverEnvVars }
       });
 
       // Handle stdout (responses from server)
@@ -545,7 +573,8 @@ export function getMCPClientManager(): MCPClientManager {
       // Local mode: spawn Python processes
       const backendDir = process.cwd();
       const projectRoot = path.resolve(backendDir, '..');
-      const mcpServersPath = path.join(projectRoot, 'MCP-Servers');
+      // Repo folder is `mcp-servers` (see mcp-servers/README.md); avoid `MCP-Servers` — breaks on Linux case-sensitive FS
+      const mcpServersPath = path.join(projectRoot, 'mcp-servers');
       
       // Debug logging
       logger.log(`[MCP Client] Backend dir: ${backendDir}`);
