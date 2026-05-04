@@ -1994,6 +1994,61 @@ router.post('/:id/end', enforceTimer, async (req: ExpressRequest, res: ExpressRe
           }
         }
 
+        // ── 1b. Collect terminal exec history from container file-server ──────
+        // The container's file-server.js keeps a rolling log of the last 20
+        // commands (command, cwd, exitCode, stdout, stderr, startedAt, finishedAt).
+        // We persist each entry as a command_executed Event so terminal_analyzer.py
+        // and timeBehaviorAgent.ts see real terminal evidence, not just inferred events.
+        if (current.containerUrl) {
+          try {
+            const fileServerBase = current.containerUrl.replace(/:(\d+)\/?$/, ':9090');
+            const token = fileServerToken(id);
+            const histRes = await fetch(`${fileServerBase}/exec/history?n=20`, {
+              headers: { Authorization: `Bearer ${token}` },
+              signal: AbortSignal.timeout(8_000),
+            });
+            if (histRes.ok) {
+              const { history } = await histRes.json() as { history: any[] };
+              if (Array.isArray(history) && history.length > 0) {
+                // Upsert events — avoid duplicates on repeated /end calls
+                const existing = await prisma.event.findMany({
+                  where: { sessionId: id, eventType: 'command_executed' },
+                  select: { metadata: true },
+                });
+                const existingCmds = new Set(
+                  existing.map((e: any) => `${(e.metadata as any)?.command}|${(e.metadata as any)?.startedAt}`)
+                );
+                const toInsert = history.filter((h: any) =>
+                  !existingCmds.has(`${h.command}|${h.startedAt}`)
+                );
+                if (toInsert.length > 0) {
+                  await prisma.event.createMany({
+                    data: toInsert.map((h: any) => ({
+                      sessionId: id,
+                      eventType: 'command_executed',
+                      timestamp: new Date(h.startedAt ?? Date.now()),
+                      metadata: {
+                        command: h.command,
+                        cwd: h.cwd,
+                        exitCode: h.exitCode,
+                        stdout: (h.stdout ?? '').slice(0, 2000),
+                        stderr: (h.stderr ?? '').slice(0, 1000),
+                        success: h.success,
+                        finishedAt: h.finishedAt,
+                        source: 'container_exec_history',
+                      },
+                    })),
+                    skipDuplicates: true,
+                  });
+                  logger.log(`[Session End] Saved ${toInsert.length} terminal commands from container for session ${id}`);
+                }
+              }
+            }
+          } catch (e: any) {
+            logger.warn('[Session End] Could not collect exec history from container:', e.message);
+          }
+        }
+
         // ── 2. Lock any Google Docs/Sheets to read-only ───────────────────────
         try {
           const { lockGoogleFile } = await import('../services/google-auth');
@@ -2102,8 +2157,8 @@ router.post('/:id/end', enforceTimer, async (req: ExpressRequest, res: ExpressRe
                 aiInteractions: sess.aiInteractions.map((ai: any) => ({
                   id: ai.id,
                   eventType: ai.eventType,
-                  prompt: ai.promptText ?? undefined,
-                  response: ai.responseText ?? undefined,
+                  promptText: ai.promptText ?? undefined,
+                  responseText: ai.responseText ?? undefined,
                   model: ai.model ?? undefined,
                   promptTokens: ai.promptTokens ?? undefined,
                   completionTokens: ai.completionTokens ?? undefined,
@@ -2111,6 +2166,10 @@ router.post('/:id/end', enforceTimer, async (req: ExpressRequest, res: ExpressRe
                   timestamp: ai.timestamp,
                   tabId: ai.tabId ?? undefined,
                   conversationTurn: ai.conversationTurn ?? undefined,
+                  // Code diffs — critical for diff_analyzer and response_analyzer
+                  codeSnippet: ai.codeSnippet ?? undefined,
+                  codeBefore: ai.codeBefore ?? undefined,
+                  codeAfter: ai.codeAfter ?? undefined,
                 })),
                 codeSnapshots: sess.codeSnapshots.map((snap: any) => ({
                   id: snap.id,
@@ -2123,6 +2182,10 @@ router.post('/:id/end', enforceTimer, async (req: ExpressRequest, res: ExpressRe
                   eventType: ev.eventType,
                   timestamp: ev.timestamp,
                   metadata: ev.metadata ?? undefined,
+                  // Include code diffs stored in event metadata (file_modified events)
+                  codeSnippet: (ev.metadata as any)?.codeSnippet ?? undefined,
+                  codeBefore: (ev.metadata as any)?.codeBefore ?? undefined,
+                  codeAfter: (ev.metadata as any)?.codeAfter ?? undefined,
                 })),
                 assessment: sess.assessment ? {
                   jobTitle: sess.assessment.jobTitle ?? undefined,
@@ -2130,6 +2193,28 @@ router.post('/:id/end', enforceTimer, async (req: ExpressRequest, res: ExpressRe
                   level: sess.assessment.level ?? undefined,
                   techStack: sess.assessment.techStack ?? undefined,
                   template: sess.assessment.template ?? undefined,
+                  // ── Manifest: canonical bug list from Server B, needed by bugFixAgent + taskDifficultyAgent
+                  // Try templateRef first (new path), then inline template (legacy path)
+                  assessmentManifest: (() => {
+                    const tRef = (sess.assessment as any).templateRef?.templateSpec as any;
+                    if (tRef?.assessmentManifest) return tRef.assessmentManifest;
+                    const inline = sess.assessment.template as any;
+                    return inline?.templateSpec?.assessmentManifest || inline?.assessmentManifest || null;
+                  })(),
+                } : undefined,
+                // ── Gemini video analysis — already computed, now fed into the orchestrator
+                // so the Structuring Agent and Judge see video evidence before making verdict
+                videoAnalysis: geminiVideoAnalysis ? {
+                  overallRisk: geminiVideoAnalysis.overallVerdict === 'focused'
+                    ? 'low'
+                    : geminiVideoAnalysis.overallVerdict === 'somewhat_distracted'
+                    ? 'medium'
+                    : 'high',
+                  suspiciousActivities: geminiVideoAnalysis.suspiciousActivity ?? [],
+                  verdict: geminiVideoAnalysis.overallVerdict ?? 'unknown',
+                  confidence: geminiVideoAnalysis.confidence === 'high' ? 0.9
+                    : geminiVideoAnalysis.confidence === 'medium' ? 0.6 : 0.3,
+                  frameCount: geminiVideoAnalysis.framesAnalyzed ?? 0,
                 } : undefined,
               };
 

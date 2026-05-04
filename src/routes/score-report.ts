@@ -101,17 +101,32 @@ router.get('/:sessionId', authenticate, checkSessionOwnership, async (req: Reque
     }
 
     // 4. If we have a manifest, use manifest-aware scoring
+    // Check DB first — if already computed, skip the expensive re-run
     let manifestScore: any = null;
-    if (manifest) {
+    const existingInsights = await prisma.agentInsight.findUnique({ where: { sessionId } });
+    if ((existingInsights as any)?.scoreReport) {
+      manifestScore = (existingInsights as any).scoreReport;
+      logger.log(`[Score Report] Using cached Agent 9 result for ${sessionId}`);
+    } else if (manifest) {
       try {
         manifestScore = await scoreWithManifest(sessionId, manifest, finalFiles);
+        // Persist so subsequent visits skip the re-computation
+        if (manifestScore?.success) {
+          await prisma.agentInsight.upsert({
+            where: { sessionId },
+            create: { sessionId, scoreReport: manifestScore as any },
+            update: { scoreReport: manifestScore as any, updatedAt: new Date() },
+          });
+          logger.log(`[Score Report] Agent 9 result persisted for ${sessionId}`);
+        }
       } catch (err: any) {
         logger.error(`Manifest scoring failed for ${sessionId}: ${err.message}`);
       }
     }
 
     // 5. Read pre-computed insights from DB (stored during live session + post-session pipeline)
-    const insights = await prisma.agentInsight.findUnique({ where: { sessionId } });
+    // Re-use existingInsights loaded earlier to avoid a second DB round-trip
+    const insights = existingInsights ?? await prisma.agentInsight.findUnique({ where: { sessionId } });
     const watcher  = (insights?.watcher  as any) ?? null;
     const analysis = (insights?.extractor as any) ?? null;
 

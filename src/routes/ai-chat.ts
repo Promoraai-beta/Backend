@@ -140,6 +140,10 @@ router.post('/', async (req: Request, res: Response) => {
     const promptText = messages.filter((m: any) => m.role === 'user').pop()?.content ?? '';
     const startTime = Date.now();
 
+    // NOTE: prompt_sent is tracked client-side via useAIWatcher in AIAssistantPanel.
+    // The backend only writes response_received (with accurate token counts from the API).
+    // Do NOT add a prompt_sent write here — it would double-count every user message.
+
     const result = streamText({
       model: resolveModel(modelName),
       system: systemPrompt,

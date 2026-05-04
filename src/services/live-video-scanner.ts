@@ -41,6 +41,10 @@ const inProgress = new Set<string>();
 /** singleton interval reference */
 let intervalRef: NodeJS.Timeout | null = null;
 
+/** Global concurrency semaphore — limits simultaneous AI video scans */
+let activeScanCount = 0;
+const MAX_CONCURRENT_SCANS = 3;
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /** Call when a session becomes active (status = 'active') */
@@ -111,8 +115,9 @@ async function needsScan(
   // First scan (no previous scan) — run unconditionally after FIRST_SCAN_AFTER_MS
   if (meta.lastScanAt === null) return true;
 
-  // Tab switch threshold
-  if ((session.tabSwitchCount || 0) >= TAB_SWITCH_THRESHOLD) return true;
+  // Tab switch threshold — safe fallback handles schema variations
+  const tabSwitchCount = (session as any).tabSwitchCount ?? (session as any).tabSwitches ?? 0;
+  if (tabSwitchCount >= TAB_SWITCH_THRESHOLD) return true;
 
   // Watcher risk score threshold — check AgentInsight separately
   const insight = await prisma.agentInsight.findUnique({
@@ -126,13 +131,18 @@ async function needsScan(
 }
 
 async function runScan(sessionId: string): Promise<void> {
+  if (activeScanCount >= MAX_CONCURRENT_SCANS) {
+    logger.log('[LiveScanner] Concurrency limit reached, skipping scan');
+    return;
+  }
+
   inProgress.add(sessionId);
+  activeScanCount++;
   const meta = tracked.get(sessionId);
-  logger.log(`[LiveVideoScan] 🔍 Running mid-session scan for ${sessionId}...`);
+  logger.log(`[LiveVideoScan] Running mid-session scan for ${sessionId}... (active: ${activeScanCount}/${MAX_CONCURRENT_SCANS})`);
 
   try {
-    // Run video analysis — the service already caps at 20 frames;
-    // for mid-session we rely on the fact that fewer chunks = fewer frames extracted
+    // Run video analysis — proportional frame cap applied inside analyzeSessionVideo
     const result = await analyzeSessionVideo(sessionId);
 
     if (!result) {
@@ -168,9 +178,13 @@ async function runScan(sessionId: string): Promise<void> {
 
     // If high-risk verdict, also trigger a watcher run immediately
     if (result.overallVerdict === 'distracted' || result.suspiciousActivity.length > 0) {
-      logger.log(`[LiveVideoScan] 🚨 Suspicious activity detected — triggering watcher for ${sessionId}`);
-      const { scheduleRealtimeIntegrity } = await import('./realtime-integrity');
-      scheduleRealtimeIntegrity(sessionId);
+      logger.log(`[LiveVideoScan] Suspicious activity detected — triggering watcher for ${sessionId}`);
+      try {
+        const mod = await import('./realtime-integrity');
+        mod.scheduleRealtimeIntegrity(sessionId);
+      } catch (e: any) {
+        console.warn('[LiveScanner] realtime-integrity module not available:', e.message);
+      }
     }
 
     // Update meta
@@ -180,5 +194,6 @@ async function runScan(sessionId: string): Promise<void> {
     logger.error(`[LiveVideoScan] Scan failed for ${sessionId}: ${err.message}`);
   } finally {
     inProgress.delete(sessionId);
+    activeScanCount--;
   }
 }

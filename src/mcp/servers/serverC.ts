@@ -1,6 +1,6 @@
 /**
  * MCP Server C Client - Live Monitoring
- * 
+ * Updated: forces nodemon restart so metrics.ts greeting-filter for model breakdown takes effect.
  * Provides functions to interact with Server C (Real-time Monitoring, Code Analysis, Risk Assessment)
  */
 

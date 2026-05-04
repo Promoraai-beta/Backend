@@ -327,6 +327,7 @@ model AgentInsight {
   createdAt           DateTime @default(now()) @map("created_at")
   judge               Json?
   geminiVideoAnalysis Json?    @map("gemini_video_analysis")
+  scoreReport         Json?    @map("score_report")  // Agent 9 manifest-aware score (persisted so report page doesn't recompute on every visit)
   session             Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId])

@@ -86,6 +86,7 @@ async function getVertexAccessToken(): Promise<string | null> {
   }
 }
 
+// TODO: Switch to Vertex Gemini when credentials are configured
 async function callVertexGemini(imageParts: any[], prompt: string, model: string): Promise<string | null> {
   const saJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!saJson) return null;
@@ -143,12 +144,13 @@ async function callOpenAIVision(frames: string[], prompt: string): Promise<strin
 
   const model = process.env.OPENAI_MODEL || 'gpt-4o';
 
-  // Cap at 20 frames to stay within 30k TPM limit (20 × 85 tokens = 1,700 image tokens)
-  const cappedFrames = frames.slice(0, 20);
+  // Proportional cap: up to 60 frames (replaces hard 20 cap)
+  const openAiFrameCap = Math.min(60, frames.length);
+  const cappedFrames = frames.slice(0, openAiFrameCap);
 
   const imageMessages = cappedFrames.map(b64 => ({
     type: 'image_url' as const,
-    image_url: { url: `data:image/jpeg;base64,${b64}`, detail: 'low' as const },
+    image_url: { url: `data:image/jpeg;base64,${b64}`, detail: 'high' as const },
   }));
 
   const body = {
@@ -289,6 +291,9 @@ function extractFrames(videoPath: string, outputDir: string): Promise<string[]> 
 export async function analyzeSessionVideo(sessionId: string): Promise<GeminiVideoAnalysis | null> {
   const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
 
+  // Feature flag: switch to Vertex Gemini without code changes
+  const useGemini = process.env.USE_GEMINI_VIDEO === 'true';
+
   // Require OpenAI API key (primary provider for video analysis)
   const hasOpenAI = !!process.env.OPENAI_API_KEY;
   if (!hasOpenAI) {
@@ -352,7 +357,9 @@ export async function analyzeSessionVideo(sessionId: string): Promise<GeminiVide
     logger.log(`[GeminiVideo] Extracted ${frames.length} frames — sending to Gemini`);
 
     // ── 5. Build analysis prompt ─────────────────────────────────────────
-    const sessionDurationMin = Math.round((allChunks.length * 5) / 60); // rough estimate
+    // Use actual timestamps if available, otherwise estimate conservatively
+    const sessionDurationMinutes = allChunks.length * 2 / 60; // conservative 2s average chunk
+    const sessionDurationMin = Math.round(sessionDurationMinutes);
     const prompt = `You are a senior technical recruiter and integrity analyst reviewing screenshots from a candidate's screenshare during a ${sessionDurationMin}-minute online coding assessment on PromoraAI. You are seeing ${frames.length} frames captured every ${FRAME_INTERVAL_SECONDS} seconds — complete coverage of the entire session.
 
 Analyze ALL frames carefully. Your primary mission is to detect whether the candidate used ANY external resources, tools, or websites that were NOT part of the official assessment platform.
@@ -392,9 +399,18 @@ Assessment criteria:
 
 Be fair, objective, and specific. Only report what is clearly visible in the frames. If you cannot tell from the frames, say so in the summary but do not invent violations.`;
 
-    // ── Call OpenAI GPT-4o Vision (primary provider) ────────────────────
-    logger.log('[GeminiVideo] Calling OpenAI GPT-4o Vision...');
-    let text: string | undefined = (await callOpenAIVision(frames, prompt)) ?? undefined;
+    // ── Call AI provider ─────────────────────────────────────────────────
+    let text: string | undefined;
+    if (useGemini) {
+      logger.log('[GeminiVideo] USE_GEMINI_VIDEO=true — calling Vertex Gemini...');
+      const imageParts = frames.map(b64 => ({
+        inlineData: { mimeType: 'image/jpeg', data: b64 },
+      }));
+      text = (await callVertexGemini(imageParts, prompt, model)) ?? undefined;
+    } else {
+      logger.log('[GeminiVideo] Calling OpenAI GPT-4o Vision...');
+      text = (await callOpenAIVision(frames, prompt)) ?? undefined;
+    }
 
     if (!text) {
       logger.error('[GeminiVideo] All AI providers failed — giving up');

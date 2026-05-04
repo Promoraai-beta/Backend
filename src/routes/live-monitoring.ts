@@ -3,6 +3,7 @@ import { watchSession, executeAnalysis, flagSanityChecks } from '../mcp/servers/
 import { prisma } from '../lib/prisma';
 import { liveMonitoringLimiter } from '../middleware/rate-limiter';
 import { authenticate, checkSessionOwnership } from '../middleware/rbac';
+import { calculatePromptQuality as _calcPromptQuality, calculateSelfReliance as _calcSelfReliance } from '../services/metrics';
 
 const router = Router();
 
@@ -214,49 +215,14 @@ function detectLatestActivity(interactions: any[]): string {
   return `${Math.floor(timeDiff / 60)}m ago`;
 }
 
-// Helper: Calculate prompt quality score
+// Delegate to canonical implementations in services/metrics.ts
+// (which correctly filter out platform greeting/init messages)
 function calculatePromptQuality(interactions: any[]): number {
-  const prompts = interactions.filter(i => i.eventType === 'prompt_sent');
-  if (prompts.length === 0) return 100;
-
-  let qualityScore = 100;
-  prompts.forEach((prompt: any) => {
-    if (prompt.promptText) {
-      const text = prompt.promptText.toLowerCase();
-      if (/solve.*entire|complete.*solution|write.*whole|do.*this.*for.*me/.test(text)) {
-        qualityScore -= 15;
-      } else if (/explain|how.*work|what.*is/.test(text)) {
-        qualityScore += 2;
-      } else if (text.length > 100) {
-        qualityScore += 1;
-      }
-    }
-  });
-
-  return Math.max(0, Math.min(100, qualityScore / prompts.length));
+  return _calcPromptQuality(interactions);
 }
 
-// Helper: Calculate self-reliance score
 function calculateSelfReliance(interactions: any[], submissions: any[]): number {
-  let score = 100;
-  const totalPrompts = interactions.filter(i => i.eventType === 'prompt_sent').length;
-  
-  // Deduct for excessive prompting
-  if (totalPrompts > 30) score -= 30;
-  else if (totalPrompts > 20) score -= 20;
-  else if (totalPrompts > 10) score -= 10;
-
-  // Check for solution requests
-  const solutionRequests = interactions.filter((i: any) => {
-    if (i.eventType === 'prompt_sent' && i.promptText) {
-      return /solve|complete|write.*for.*me|give.*answer/.test(i.promptText.toLowerCase());
-    }
-    return false;
-  }).length;
-
-  score -= solutionRequests * 10;
-
-  return Math.max(0, score);
+  return _calcSelfReliance(interactions, submissions);
 }
 
 // Helper: Generate alerts
