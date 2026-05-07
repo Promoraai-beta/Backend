@@ -421,19 +421,52 @@ ${issueLines}
       }
     }
 
-    res.json({
+    // Build a plain object with only the fields the frontend needs.
+    // Never spread the full Prisma row — it can contain large JSON blobs or
+    // non-serialisable values (Dates nested in JSON, etc.) that silently break
+    // JSON.stringify and cause Express to return a plain-text 500.
+    const responsePayload = {
       success: true,
       data: {
-        ...data,
+        id:                       String(data.id),
+        sessionCode:              String(data.sessionCode),
+        candidateName:            data.candidateName  ?? null,
+        candidateEmail:           data.candidateEmail ?? null,
+        status:                   data.status         ?? 'pending',
+        timeLimit:                data.timeLimit       ?? null,
+        expiresAt:                data.expiresAt ? data.expiresAt.toISOString() : null,
+        containerId:              (data as any).containerId    ?? null,
+        containerUrl:             (data as any).containerUrl   ?? null,
+        containerStatus:          (data as any).containerStatus ?? null,
+        assignedVariantId:        (data as any).assignedVariantId ?? null,
+        createdAt:                data.createdAt ? data.createdAt.toISOString() : null,
         emailDelivered,
         assessmentUrl,
-        assignedVariantTemplateId,
-        variantMeta,
-      }
-    });
+        assignedVariantTemplateId: assignedVariantTemplateId ?? null,
+        variantMeta:               variantMeta ?? null,
+      },
+    };
+
+    // Serialize manually so a bad value surfaces as a clear error instead of a
+    // silent 500 with no message.
+    let responseStr: string;
+    try {
+      responseStr = JSON.stringify(responsePayload);
+    } catch (serErr: any) {
+      logger.error('Session response serialisation failed:', serErr);
+      return res.status(500).json({ success: false, error: `Response serialisation failed: ${serErr.message}` });
+    }
+
+    res.setHeader('Content-Type', 'application/json');
+    res.status(200).end(responseStr);
+
   } catch (error: any) {
     logger.error('Session creation error:', error);
-    res.status(500).json({ success: false, error: error.message });
+    // Use res.end() instead of res.json() in the error path to avoid a second
+    // serialisation failure masking the real error.
+    const errPayload = JSON.stringify({ success: false, error: error?.message || 'Session creation failed' });
+    res.setHeader('Content-Type', 'application/json');
+    res.status(500).end(errPayload);
   }
 });
 
@@ -2218,7 +2251,9 @@ router.post('/:id/end', enforceTimer, async (req: ExpressRequest, res: ExpressRe
                 } : undefined,
               };
 
-              const serverCUrl = `http://localhost:${process.env.SERVER_C_PORT ?? 3002}/analyze`;
+              // SERVER_C_URL takes precedence in deployment (e.g. http://server-c-orchestrator:3002/analyze)
+              // Falls back to localhost for local dev.
+              const serverCUrl = process.env.SERVER_C_URL ?? `http://localhost:${process.env.SERVER_C_PORT ?? 3002}/analyze`;
               return fetch(serverCUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -2987,25 +3022,43 @@ router.get('/:id/files', optionalAuthenticate, async (req: ExpressRequest, res: 
   try {
     const session = await prisma.session.findUnique({
       where: { id: req.params.id },
-      select: { containerId: true, containerUrl: true },
+      select: {
+        containerId: true,
+        containerUrl: true,
+        assignedVariant: { select: { templateSpec: true } },
+        assessment: { select: { templateRef: { select: { templateSpec: true } } } },
+      },
     });
     if (!session?.containerId) {
       return res.status(404).json({ error: 'No running container for this session' });
     }
 
     if (isAzureContainerId(session.containerId)) {
-      // Proxy to the container's file-server on port 9090
-      if (!session.containerUrl) {
-        return res.status(503).json({ error: 'Container URL not available' });
+      // Try the container's file-server on port 9090 first
+      if (session.containerUrl) {
+        try {
+          const token = fileServerToken(req.params.id);
+          const upstream = await fetch(`${azureFileServerUrl(session.containerUrl)}/files`, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: AbortSignal.timeout(5000),
+          });
+          if (upstream.ok) {
+            const data = await upstream.json();
+            return res.json(data);
+          }
+        } catch {
+          // file server unavailable — fall through to template fallback
+        }
       }
-      const token = fileServerToken(req.params.id);
-      const upstream = await fetch(`${azureFileServerUrl(session.containerUrl)}/files`, {
-        headers: { Authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(10000),
-      });
-      const data = await upstream.json();
-      if (!upstream.ok) return res.status(upstream.status).json(data);
-      return res.json(data);
+      // Fallback: return file paths from the stored template spec (original codebase)
+      const templateSpec = (session.assignedVariant?.templateSpec as any)
+        ?? (session.assessment?.templateRef?.templateSpec as any);
+      const fileStructure: Record<string, string> = templateSpec?.fileStructure ?? {};
+      const files = Object.keys(fileStructure);
+      if (files.length > 0) {
+        return res.json({ files, source: 'template' });
+      }
+      return res.status(503).json({ error: 'Container file server unavailable and no template fallback found' });
     }
 
     const files = await listContainerFiles(session.containerId);
@@ -3023,24 +3076,44 @@ router.get('/:id/files/*', optionalAuthenticate, async (req: ExpressRequest, res
 
     const session = await prisma.session.findUnique({
       where: { id: req.params.id },
-      select: { containerId: true, containerUrl: true },
+      select: {
+        containerId: true,
+        containerUrl: true,
+        assignedVariant: { select: { templateSpec: true } },
+        assessment: { select: { templateRef: { select: { templateSpec: true } } } },
+      },
     });
     if (!session?.containerId) {
       return res.status(404).json({ error: 'No running container for this session' });
     }
 
     if (isAzureContainerId(session.containerId)) {
-      if (!session.containerUrl) {
-        return res.status(503).json({ error: 'Container URL not available' });
+      // Try the container's file-server on port 9090 first
+      if (session.containerUrl) {
+        try {
+          const token = fileServerToken(req.params.id);
+          const upstream = await fetch(`${azureFileServerUrl(session.containerUrl)}/files/${filePath}`, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: AbortSignal.timeout(5000),
+          });
+          if (upstream.ok) {
+            const data = await upstream.json();
+            return res.json(data);
+          }
+        } catch {
+          // file server unavailable — fall through to template fallback
+        }
       }
-      const token = fileServerToken(req.params.id);
-      const upstream = await fetch(`${azureFileServerUrl(session.containerUrl)}/files/${filePath}`, {
-        headers: { Authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(10000),
-      });
-      const data = await upstream.json();
-      if (!upstream.ok) return res.status(upstream.status).json(data);
-      return res.json(data);
+      // Fallback: serve file content from stored template spec
+      const templateSpec = (session.assignedVariant?.templateSpec as any)
+        ?? (session.assessment?.templateRef?.templateSpec as any);
+      const fileStructure: Record<string, string> = templateSpec?.fileStructure ?? {};
+      // Try exact match, then with leading slash stripped
+      const content = fileStructure[filePath] ?? fileStructure[filePath.replace(/^\//, '')];
+      if (content !== undefined) {
+        return res.json({ path: filePath, content, source: 'template' });
+      }
+      return res.status(404).json({ error: `File not found: ${filePath}` });
     }
 
     const content = await readContainerFile(session.containerId, filePath);

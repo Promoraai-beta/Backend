@@ -151,7 +151,11 @@ export const docsTool: AssessmentTool = {
   metaKey: 'hasDocs',
 
   detect(ctx: ScenarioContext): boolean {
-    return ctx.components.includes('docs');
+    // Activate explicitly when 'docs' is in components
+    if (ctx.components.includes('docs')) return true;
+    // Also activate for IDE challenges — any session with code files gets a Google Doc
+    // as a scratchpad. fileStructure is non-empty whenever the template has actual code.
+    return Object.keys(ctx.fileStructure).length > 0;
   },
 
   generateContent(ctx: ScenarioContext): ToolContent {

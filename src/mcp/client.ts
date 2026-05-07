@@ -42,6 +42,16 @@ interface MCPTool {
   inputSchema: any;
 }
 
+/**
+ * Common interface implemented by both MCPClient (stdio/docker) and MCPHttpClient (HTTP).
+ * Callers (serverA/B/C.ts) only depend on this interface.
+ */
+export interface IMCPClient {
+  callTool(toolName: string, arguments_: any): Promise<any>;
+  getTools(): MCPTool[];
+  stop(): void;
+}
+
 // Docker connection (same as template-builder.ts)
 const dockerOptions: any = {};
 if (process.platform === 'darwin') {
@@ -72,7 +82,7 @@ const docker = new Docker(dockerOptions);
 /**
  * MCP Client for communicating with Python MCP servers via stdio
  */
-export class MCPClient extends EventEmitter {
+export class MCPClient extends EventEmitter implements IMCPClient {
   private process: ChildProcess | null = null;
   private dockerExec: any = null;
   private requestId = 0;
@@ -485,42 +495,128 @@ export class MCPClient extends EventEmitter {
 }
 
 /**
+ * MCPHttpClient - HTTP REST client for deployed MCP servers.
+ *
+ * Used in production when MCP_USE_HTTP=true.  Each Python MCP server exposes:
+ *   GET  /health      → { status, server }
+ *   GET  /tools       → { tools: [...] }
+ *   POST /call_tool   → { result } | { error }
+ *
+ * Server B (template builder) runs LLM generation that takes 2-3 min, so its
+ * timeout is set to 5 minutes; A and C default to 60 s.
+ */
+export class MCPHttpClient implements IMCPClient {
+  private baseUrl: string;
+  private tools: MCPTool[] = [];
+  private initialized = false;
+  private timeoutMs: number;
+
+  constructor(baseUrl: string, timeoutMs = 60_000) {
+    this.baseUrl = baseUrl.replace(/\/$/, '');
+    this.timeoutMs = timeoutMs;
+  }
+
+  async start(): Promise<void> {
+    // Health check (10 s timeout)
+    const hc = new AbortController();
+    const hcTimer = setTimeout(() => hc.abort(), 10_000);
+    try {
+      const res = await fetch(`${this.baseUrl}/health`, { signal: hc.signal });
+      if (!res.ok) throw new Error(`MCP HTTP server unhealthy at ${this.baseUrl} (${res.status})`);
+    } finally {
+      clearTimeout(hcTimer);
+    }
+
+    // Load tool list
+    const toolsRes = await fetch(`${this.baseUrl}/tools`);
+    if (!toolsRes.ok) throw new Error(`Failed to list tools from ${this.baseUrl} (${toolsRes.status})`);
+    const toolsData = await toolsRes.json();
+    this.tools = toolsData.tools || [];
+    this.initialized = true;
+    logger.log(`[MCPHttpClient] Connected to ${this.baseUrl} — ${this.tools.length} tools`);
+  }
+
+  async callTool(toolName: string, arguments_: any): Promise<any> {
+    if (!this.initialized) throw new Error('MCPHttpClient not initialized. Call start() first.');
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const res = await fetch(`${this.baseUrl}/call_tool`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: toolName, arguments: arguments_ }),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status} from MCP server: ${text}`);
+      }
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      return data.result;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  getTools(): MCPTool[] {
+    return this.tools;
+  }
+
+  stop(): void {
+    this.initialized = false;
+  }
+}
+
+/**
  * MCP Client Manager - Manages multiple MCP server connections
  */
 export class MCPClientManager {
-  private clients = new Map<string, MCPClient>();
+  private clients = new Map<string, IMCPClient>();
   private basePath: string;
   private useDocker: boolean;
   private containerPrefix: string;
+  private serverUrls: Record<string, string> | null;
 
-  constructor(basePath: string, useDocker: boolean = false, containerPrefix: string = 'promora-mcp-server') {
+  constructor(
+    basePath: string,
+    useDocker: boolean = false,
+    containerPrefix: string = 'promora-mcp-server',
+    serverUrls: Record<string, string> | null = null,
+  ) {
     this.basePath = basePath;
     this.useDocker = useDocker;
     this.containerPrefix = containerPrefix;
+    this.serverUrls = serverUrls;
   }
 
   /**
    * Get or create MCP client for a server
    */
-  async getClient(serverName: 'server-a-job-analysis' | 'server-b-template-builder' | 'server-c-monitoring'): Promise<MCPClient> {
+  async getClient(serverName: 'server-a-job-analysis' | 'server-b-template-builder' | 'server-c-monitoring'): Promise<IMCPClient> {
     const serverKey = serverName;
-    
-    if (!this.clients.has(serverKey)) {
-      let client: MCPClient;
 
-      if (this.useDocker) {
-        // Use Docker containers
+    if (!this.clients.has(serverKey)) {
+      let client: IMCPClient;
+
+      if (this.serverUrls) {
+        // HTTP mode — used in deployment; each MCP server runs as its own service
+        const url = this.serverUrls[serverName];
+        if (!url) throw new Error(`No HTTP URL configured for MCP server: ${serverName}`);
+        // Server B runs LLM generation (~2-3 min) so give it a 5-minute timeout
+        const timeoutMs = serverName === 'server-b-template-builder' ? 300_000 : 60_000;
+        client = new MCPHttpClient(url, timeoutMs);
+      } else if (this.useDocker) {
+        // Docker exec mode (stdio over docker exec stream)
         const containerName = this.getContainerName(serverName);
-        client = new MCPClient('', containerName); // Path not needed for Docker
+        client = new MCPClient('', containerName);
       } else {
-        // Use local spawn
+        // Local spawn mode — default for local dev
         const serverPath = path.join(this.basePath, serverName, 'src', 'server.py');
-        
-        // Check if server file exists
         if (!fs.existsSync(serverPath)) {
           throw new Error(`MCP server not found: ${serverPath}`);
         }
-
         client = new MCPClient(serverPath);
       }
 
@@ -562,32 +658,47 @@ let clientManager: MCPClientManager | null = null;
  */
 export function getMCPClientManager(): MCPClientManager {
   if (!clientManager) {
-    // Check if we should use Docker (production) or local spawn (development)
-    const useDocker = process.env.MCP_USE_DOCKER === 'true' || process.env.NODE_ENV === 'production';
-    
-    if (useDocker) {
-      // Docker mode: containers are already running
-      logger.log('[MCP Client] Using Docker containers for MCP servers');
+    const useHttp   = process.env.MCP_USE_HTTP === 'true';
+    const useDocker = process.env.MCP_USE_DOCKER === 'true';
+
+    if (useHttp) {
+      // ── HTTP mode (deployment) ────────────────────────────────────────────
+      // Each MCP server runs as its own container/service and exposes a REST API.
+      // Set MCP_SERVER_A_URL / _B_URL / _C_URL in the backend's .env (or Docker Compose).
+      const serverUrls: Record<string, string> = {
+        'server-a-job-analysis':     process.env.MCP_SERVER_A_URL || 'http://localhost:8001',
+        'server-b-template-builder': process.env.MCP_SERVER_B_URL || 'http://localhost:8002',
+        'server-c-monitoring':       process.env.MCP_SERVER_C_URL || 'http://localhost:8003',
+      };
+      logger.log('[MCP Client] Using HTTP transport for MCP servers');
+      logger.log(`[MCP Client] Server A → ${serverUrls['server-a-job-analysis']}`);
+      logger.log(`[MCP Client] Server B → ${serverUrls['server-b-template-builder']}`);
+      logger.log(`[MCP Client] Server C → ${serverUrls['server-c-monitoring']}`);
+      clientManager = new MCPClientManager('', false, '', serverUrls);
+
+    } else if (useDocker) {
+      // ── Docker exec mode ─────────────────────────────────────────────────
+      // MCP servers run inside Docker containers; communicate via docker exec + stdio.
+      logger.log('[MCP Client] Using Docker exec for MCP servers');
       clientManager = new MCPClientManager('', true, 'promora-mcp-server');
+
     } else {
-      // Local mode: spawn Python processes
+      // ── Local spawn mode (default for local dev) ──────────────────────────
       const backendDir = process.cwd();
       const projectRoot = path.resolve(backendDir, '..');
-      // Repo folder is `mcp-servers` (see mcp-servers/README.md); avoid `MCP-Servers` — breaks on Linux case-sensitive FS
       const mcpServersPath = path.join(projectRoot, 'mcp-servers');
-      
-      // Debug logging
+
       logger.log(`[MCP Client] Backend dir: ${backendDir}`);
       logger.log(`[MCP Client] Using local spawn for MCP servers at: ${mcpServersPath}`);
-      
+
       const serverAPath = path.join(mcpServersPath, 'server-a-job-analysis/src/server.py');
       const serverAExists = fs.existsSync(serverAPath);
       logger.log(`[MCP Client] Server A exists: ${serverAExists} at ${serverAPath}`);
-      
+
       if (!serverAExists) {
         throw new Error(`MCP server not found at: ${serverAPath}`);
       }
-      
+
       clientManager = new MCPClientManager(mcpServersPath, false);
     }
   }

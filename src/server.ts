@@ -6,7 +6,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 dotenv.config({ path: path.resolve(__dirname, '..', '.env'), override: true });
 
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import axios from 'axios';
 import http from 'http';
@@ -72,9 +72,29 @@ app.options('*', cors());
 // Security headers (after CORS to avoid interfering with preflight)
 app.use(securityHeaders);
 
-// Body parsing with size limits
-app.use(express.json({ limit: '10mb' })); // Limit JSON payload size
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Body parsing with size limits — inline error handling prevents Express's
+// default plain-text error handler from firing when the body is malformed.
+app.use((req, res, next) => {
+  express.json({ limit: '10mb' })(req, res, (err) => {
+    if (err) {
+      res.setHeader('Content-Type', 'application/json');
+      return res.status(400).end(JSON.stringify({
+        success: false,
+        error: `Invalid request body: ${(err as any).message || err}`,
+      }));
+    }
+    next();
+  });
+});
+app.use((req, res, next) => {
+  express.urlencoded({ extended: true, limit: '10mb' })(req, res, (err) => {
+    if (err) {
+      res.setHeader('Content-Type', 'application/json');
+      return res.status(400).end(JSON.stringify({ success: false, error: `Bad form data: ${(err as any).message || err}` }));
+    }
+    next();
+  });
+});
 
 // Trust proxy for rate limiting (if behind reverse proxy)
 app.set('trust proxy', 1);
@@ -638,6 +658,39 @@ app.post('/api/execute', executeLimiter, validateCodeExecution, async (req: Requ
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// Global JSON error handler — MUST come after all routes
+// Catches any error passed via next(err) or thrown in async middleware
+// Without this, Express's default handler returns plain-text "Internal Server Error"
+// which breaks any client calling res.json() on the response.
+// Global error handler — 4-param signature is required for Express to treat
+// this as an error handler (it checks function.length === 4).
+// Wrapped in try/catch so it can never itself throw and fall through to
+// Express's built-in plain-text "Internal Server Error" handler.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function globalErrorHandler(err: any, req: Request, res: Response, _next: NextFunction) {
+  try {
+    const errMsg = (err && typeof err.message === 'string' && err.message) || String(err) || 'Unknown error';
+    const status  = (typeof err?.status === 'number' ? err.status : null)
+                 || (typeof err?.statusCode === 'number' ? err.statusCode : null)
+                 || 500;
+
+    logger.error(`[GlobalErrorHandler] ${req.method} ${req.path} → ${status}: ${errMsg}`);
+
+    if (res.headersSent) return;            // can't send twice — just bail
+    res.setHeader('Content-Type', 'application/json');
+    res.status(status).end(JSON.stringify({ success: false, error: errMsg }));
+  } catch (handlerErr) {
+    // Absolute last resort — if even our handler crashes, write a minimal response.
+    try {
+      if (!res.headersSent) {
+        res.setHeader('Content-Type', 'application/json');
+        res.status(500).end('{"success":false,"error":"Unexpected server error"}');
+      }
+    } catch { /* nothing left to do */ }
+  }
+}
+app.use(globalErrorHandler);
 
 // Initialize WebSocket server
 videoStreamServer.initialize(server);
