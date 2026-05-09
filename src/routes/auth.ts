@@ -281,10 +281,10 @@ router.get('/me', async (req: Request, res: Response) => {
       }
     });
   } catch (error: any) {
-    if (error.name === 'JsonWebTokenError') {
+    if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
       return res.status(401).json({
         success: false,
-        error: 'Invalid token'
+        error: 'Token expired. Please log in again.'
       });
     }
     logger.error('Get me error:', error);

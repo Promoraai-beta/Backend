@@ -47,6 +47,7 @@ interface MCPTool {
  * Callers (serverA/B/C.ts) only depend on this interface.
  */
 export interface IMCPClient {
+  start(): Promise<void>;
   callTool(toolName: string, arguments_: any): Promise<any>;
   getTools(): MCPTool[];
   stop(): void;
@@ -530,7 +531,7 @@ export class MCPHttpClient implements IMCPClient {
     // Load tool list
     const toolsRes = await fetch(`${this.baseUrl}/tools`);
     if (!toolsRes.ok) throw new Error(`Failed to list tools from ${this.baseUrl} (${toolsRes.status})`);
-    const toolsData = await toolsRes.json();
+    const toolsData = await toolsRes.json() as any;
     this.tools = toolsData.tools || [];
     this.initialized = true;
     logger.log(`[MCPHttpClient] Connected to ${this.baseUrl} — ${this.tools.length} tools`);
@@ -552,7 +553,7 @@ export class MCPHttpClient implements IMCPClient {
         const text = await res.text();
         throw new Error(`HTTP ${res.status} from MCP server: ${text}`);
       }
-      const data = await res.json();
+      const data = await res.json() as any;
       if (data.error) throw new Error(data.error);
       return data.result;
     } finally {

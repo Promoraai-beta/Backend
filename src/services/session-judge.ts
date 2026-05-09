@@ -8,7 +8,24 @@ import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
 
 const MAX_EVENTS = 80;
-const MODEL = process.env.OPENAI_JUDGE_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const MODEL = process.env.AZURE_OPENAI_DEPLOYMENT || process.env.OPENAI_JUDGE_MODEL || process.env.OPENAI_MODEL || 'gpt-4.1';
+
+function makeOpenAIClient(): OpenAI {
+  const azureEndpoint = process.env.AZURE_OPENAI_ENDPOINT?.trim().replace(/\/$/, '');
+  const apiKey = process.env.AZURE_OPENAI_API_KEY || process.env.OPENAI_API_KEY || '';
+  if (azureEndpoint && process.env.AZURE_OPENAI_API_KEY) {
+    // The OpenAI SDK appends /chat/completions to baseURL, so we must embed
+    // the deployment name here so the final URL is:
+    //   {endpoint}/openai/deployments/{model}/chat/completions?api-version=...
+    return new OpenAI({
+      apiKey,
+      baseURL: `${azureEndpoint}/openai/deployments/${MODEL}`,
+      defaultQuery: { 'api-version': process.env.AZURE_OPENAI_API_VERSION ?? '2025-01-01-preview' },
+      defaultHeaders: { 'api-key': apiKey },
+    });
+  }
+  return new OpenAI({ apiKey });
+}
 
 export interface JudgeResult {
   integrity_verdict: 'pass' | 'warn' | 'fail';
@@ -68,9 +85,9 @@ export async function judgeSession(
   sessionId: string,
   options?: { truncateEvents?: number }
 ): Promise<JudgeResult | null> {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.AZURE_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    logger.warn('[SessionJudge] OPENAI_API_KEY not set, skipping');
+    logger.warn('[SessionJudge] No OpenAI API key set, skipping');
     return null;
   }
 
@@ -109,7 +126,7 @@ You see a chronological timeline of events. Use your judgment. Return ONLY valid
 
     const userPrompt = `Timeline of session events (oldest to newest):\n\n${timeline}\n\nEvaluate integrity and AI usage. Return JSON only.`;
 
-    const client = new OpenAI({ apiKey });
+    const client = makeOpenAIClient();
     const completion = await client.chat.completions.create({
       model: MODEL,
       messages: [

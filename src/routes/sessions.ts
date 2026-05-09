@@ -3100,14 +3100,25 @@ router.get('/:id/files/*', optionalAuthenticate, async (req: ExpressRequest, res
             const data = await upstream.json();
             return res.json(data);
           }
-        } catch {
-          // file server unavailable — fall through to template fallback
+          // Log non-ok responses for diagnosis
+          if (upstream.status === 403) {
+            logger.warn(`[Session Files] file-server returned 403 for session ${req.params.id} file ${filePath} — token mismatch? Falling back to template spec.`);
+          } else if (upstream.status === 404) {
+            // File not found in container — fall through to template spec
+          } else {
+            logger.warn(`[Session Files] file-server returned ${upstream.status} for session ${req.params.id} file ${filePath}`);
+          }
+        } catch (fetchErr: any) {
+          // file server unreachable (timeout, ECONNREFUSED, etc.) — fall through to template fallback
+          logger.warn(`[Session Files] file-server unreachable for session ${req.params.id}: ${fetchErr?.message || fetchErr}`);
         }
       }
       // Fallback: serve file content from stored template spec
       const templateSpec = (session.assignedVariant?.templateSpec as any)
         ?? (session.assessment?.templateRef?.templateSpec as any);
-      const fileStructure: Record<string, string> = templateSpec?.fileStructure ?? {};
+      const fileStructure: Record<string, string> = templateSpec?.fileStructure
+        ?? templateSpec?.files
+        ?? {};
       // Try exact match, then with leading slash stripped
       const content = fileStructure[filePath] ?? fileStructure[filePath.replace(/^\//, '')];
       if (content !== undefined) {

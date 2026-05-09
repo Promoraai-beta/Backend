@@ -27,6 +27,11 @@ import { provisionAssessmentContainer } from './azure-provisioner';
 const CHECK_INTERVAL_MS =
   parseInt(process.env.CONTAINER_KEEPALIVE_INTERVAL_MS || '600000', 10);
 
+/** Only keep-alive sessions created within this window (default: 24 hours).
+ *  Prevents hammering Azure for stale sessions from before the current setup. */
+const MAX_SESSION_AGE_HOURS =
+  parseInt(process.env.CONTAINER_KEEPALIVE_MAX_AGE_HOURS || '24', 10);
+
 /** Timeout for each individual liveness probe. */
 const PROBE_TIMEOUT_MS =
   parseInt(process.env.CONTAINER_PROBE_TIMEOUT_MS || '5000', 10);
@@ -80,11 +85,16 @@ export async function runContainerKeepalive(): Promise<{
   }
 
   try {
+    // Only keep-alive sessions created within the max age window.
+    // This prevents hammering Azure for stale sessions from before the current setup.
+    const cutoff = new Date(Date.now() - MAX_SESSION_AGE_HOURS * 60 * 60 * 1000);
+
     // Sessions that have a container pre-provisioned and are not yet finished.
     const sessions = await prisma.session.findMany({
       where: {
         containerUrl: { not: null },
         status: { in: ['pending', 'active'] },
+        createdAt: { gte: cutoff },
       },
       select: {
         id: true,

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { streamText, jsonSchema, stepCountIs } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
+import { createAzure } from '@ai-sdk/azure';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGroq } from '@ai-sdk/groq';
@@ -9,6 +10,15 @@ import { prisma } from '../lib/prisma';
 const router = Router();
 
 // ── Provider clients (keys live here in the backend only) ───────────────────
+
+// Azure OpenAI — primary provider (gpt-4.1)
+const azure = createAzure({
+  baseURL: `${(process.env.AZURE_OPENAI_ENDPOINT ?? 'https://promoraai.cognitiveservices.azure.com').replace(/\/$/, '')}/openai/deployments`,
+  apiKey: process.env.AZURE_OPENAI_API_KEY ?? '',
+  apiVersion: process.env.AZURE_OPENAI_API_VERSION ?? '2025-01-01-preview',
+});
+
+// Standard OpenAI — fallback for non-Azure models
 const openai = createOpenAI({
   apiKey: process.env.OPENAI_API_KEY ?? '',
 });
@@ -25,11 +35,19 @@ const groq = createGroq({
   apiKey: process.env.GROQ_API_KEY ?? '',
 });
 
+// Azure-hosted deployments — ONLY models actually deployed on the Azure OpenAI resource.
+// gpt-4o and gpt-4o-mini are NOT deployed there; they fall through to standard OpenAI.
+const AZURE_DEPLOYMENTS = new Set(['gpt-4.1']);
+
 /** Resolve the Vercel AI SDK model object from a model string */
 function resolveModel(modelName: string) {
   if (modelName.startsWith('gemini-'))  return google(modelName);
   if (modelName.startsWith('claude-'))  return anthropic(modelName);
   if (modelName.startsWith('llama-') || modelName.startsWith('mixtral-') || modelName.startsWith('groq-')) return groq(modelName);
+  // Route GPT models through Azure if Azure key is configured
+  if (AZURE_DEPLOYMENTS.has(modelName) && process.env.AZURE_OPENAI_API_KEY) {
+    return azure(modelName);
+  }
   return openai.chat(modelName as any);
 }
 
