@@ -17,7 +17,7 @@ import { sendEmail, generateAssessmentEmail } from '../lib/email';
 import { getFrontendUrl } from '../lib/frontend-url';
 import multer from 'multer';
 import { logger } from '../lib/logger';
-import { provisionLocalContainer, deleteLocalContainer, getLocalContainerStatus, readContainerFile, writeContainerFile, listContainerFiles, getLocalContainerUrls } from '../services/local-docker-provisioner';
+import { provisionLocalContainer, deleteLocalContainer, getLocalContainerStatus, readContainerFile, writeContainerFile, listContainerFiles, getLocalContainerUrls, refreshFileInCodeServer } from '../services/local-docker-provisioner';
 import { provisionAssessmentContainer } from '../services/azure-provisioner';
 import { fileServerToken } from '../lib/container-token';
 import { readFile } from 'fs/promises';
@@ -257,102 +257,9 @@ router.post('/', apiLimiter, optionalAuthenticate, validateSessionCreation, asyn
     }
     // ──────────────────────────────────────────────────────────────────────────
 
-    // ── Step 1: Provision the container BEFORE creating the session or sending email ──
-    // The container MUST be running before the invite goes out.
-    // If provisioning fails, we return an error to the recruiter — no session, no email.
-    let provisionedContainerId: string | null = null;
-    let provisionedContainerUrl: string | null = null;
-
-    if (assignedVariantTemplateId) {
-      const MAX_RETRIES = 3;
-      const RETRY_DELAYS_MS = [5_000, 15_000, 30_000];
-
-      // Load file structure from the just-created template
-      const tpl = await prisma.template.findUnique({
-        where: { id: assignedVariantTemplateId },
-        select: { templateSpec: true },
-      });
-      const tplSpec = tpl?.templateSpec as any;
-      const fileStructure = tplSpec?.fileStructure as Record<string, string> | undefined;
-
-      // ── Sync README.md with actual intentional issues ──────────────────────
-      // Server B stores the bugs it injected in templateSpec.intentionalIssues.
-      // Override whatever README.md Server B wrote so it always lists the real
-      // bugs and matches the Tasks panel exactly.
-      if (fileStructure && tplSpec?.intentionalIssues?.length > 0) {
-        const issues: Array<{ id: string; description: string; file?: string; severity?: string; category?: string }>
-          = tplSpec.intentionalIssues;
-
-        const readmeKey = Object.keys(fileStructure).find(
-          k => k === 'README.md' || k.toLowerCase().endsWith('/readme.md')
-        ) ?? 'README.md';
-
-        const issueLines = issues.map((issue, i) => {
-          const severity = issue.severity ? ` [${issue.severity.toUpperCase()}]` : '';
-          const file     = issue.file     ? ` in \`${issue.file}\`` : '';
-          return `${i + 1}. **${issue.description}**${severity}${file}`;
-        }).join('\n');
-
-        fileStructure[readmeKey] =
-`# Assessment Tasks
-
-Fix the following bugs that have been intentionally introduced into this codebase.
-
-## Bugs to Fix
-
-${issueLines}
-
-## Instructions
-
-- Identify each bug in the code
-- Fix all ${issues.length} issue${issues.length !== 1 ? 's' : ''} listed above
-- Make sure existing functionality still works after your fixes
-- You may use the AI Assistant panel for hints (your prompts are evaluated)
-`;
-        logger.info(`[Provision] README.md synced with ${issues.length} intentional issues`);
-      }
-
-      if (fileStructure && Object.keys(fileStructure).length > 0) {
-        // Use a temporary ID for provisioning — we'll use the real session ID once created
-        // Azure / local Docker only needs a unique string; we'll use sessionCode as the handle
-        logger.info(`[Provision] Starting container for session code ${sessionCode} (${Object.keys(fileStructure).length} files)...`);
-
-        let provisionError: string | null = null;
-        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-          try {
-            const result = getUseLocalDocker()
-              ? await provisionLocalContainer(sessionCode, fileStructure)
-              : await provisionAssessmentContainer(sessionCode, fileStructure);
-            const provResult = result as any;
-            provisionedContainerId  = provResult.containerId;
-            provisionedContainerUrl = provResult.codeServerUrl;
-            provisionError = null;
-            logger.info(`[Provision] ✅ Container ready (attempt ${attempt}) for ${sessionCode}: ${provisionedContainerUrl}`);
-            break;
-          } catch (err: any) {
-            provisionError = err.message;
-            logger.warn(`[Provision] Attempt ${attempt}/${MAX_RETRIES} failed: ${err.message}`);
-            if (attempt < MAX_RETRIES) {
-              await new Promise(resolve => setTimeout(resolve, RETRY_DELAYS_MS[attempt - 1]));
-            }
-          }
-        }
-
-        if (provisionError) {
-          // All retries failed — abort. No session created, no email sent.
-          logger.error(`[Provision] ❌ All ${MAX_RETRIES} attempts failed for ${sessionCode}: ${provisionError}`);
-          return res.status(500).json({
-            success: false,
-            error: 'Failed to provision the candidate environment. Please try again in a few minutes.',
-            detail: provisionError,
-          });
-        }
-      } else {
-        logger.info(`[Provision] Template has no fileStructure — no container needed for ${sessionCode}`);
-      }
-    }
-
-    // ── Step 2: Create the session row — container is confirmed running ────────
+    // ── Step 1: Create the session row — container will be provisioned on-demand when candidate starts ──
+    // Containers are NOT provisioned at invite time to avoid idle billing.
+    // The container is started in POST /sessions/:id/start when the candidate clicks "Start Assessment".
     const data = await prisma.session.create({
       data: {
         sessionCode,
@@ -365,11 +272,9 @@ ${issueLines}
         expiresAt:     expires_at ? new Date(expires_at) : null,
         status:        status              || 'pending',
         assignedVariantId: assignedVariantTemplateId || null,
-        // Container already running — store the URL so /start can use it immediately
-        ...(provisionedContainerId  && { containerId:     provisionedContainerId  }),
-        ...(provisionedContainerUrl && { containerUrl:    provisionedContainerUrl }),
+        // Container starts on-demand — no URL yet, status is pending
         ...(assignedVariantTemplateId && {
-          containerStatus: provisionedContainerUrl ? 'ready' : 'pending',
+          containerStatus: 'pending',
         }),
       } as any,
       include: {
@@ -382,7 +287,7 @@ ${issueLines}
     const frontendUrl = getFrontendUrl();
     const assessmentUrl = `${frontendUrl}/assessment/${sessionCode}`;
 
-    // ── Step 3: Send the invite email — container is running, URL is saved ────
+    // ── Step 2: Send the invite email — container will start when candidate clicks "Start Assessment" ──
     let emailDelivered = false;
     if (userRole === 'recruiter' && assessment_id && finalCandidateEmail) {
       try {
@@ -1450,15 +1355,14 @@ router.get('/code/:code', sessionCodeLimiter, validateSessionCodeSecurity, optio
 
 
 
-        // Early pre-provision: fire docs tool in background on page load
-        // so the Google Doc is ready before the candidate clicks Start.
-        // /start will call activateTools again — docs.tool.ts is idempotent (skips if URL exists).
-        const existingDocUrlEarly = response.toolResources?.docs?.url ?? null;
-        await activateTools(data.id, data.sessionCode, codePageCtx, response, {
-          fireAndForget: !existingDocUrlEarly,
-        });
+        // Read the persisted doc URL from the DB — never create resources in a GET route.
+        // Doc provisioning happens in POST /provision (fires once when candidate opens invite).
+        const persistedDocUrl =
+          (data as any).toolResources?.docs?.url ??
+          (data as any).docsFileUrl ??
+          null;
 
-        response.docsFileUrl = response.toolResources?.docs?.url ?? response.docsFileUrl ?? (data as any).docsFileUrl ?? null;
+        response.docsFileUrl = persistedDocUrl;
 
         // Extract template files: prefer inline templateSpec, fall back to templateRef.templateSpec
         const effectiveTemplateSpec = (template && typeof template === 'object' && 'templateSpec' in template)
@@ -1491,6 +1395,164 @@ router.get('/code/:code', sessionCodeLimiter, validateSessionCodeSecurity, optio
     res.json({ success: true, data: response });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── POST /sessions/:id/provision ─────────────────────────────────────────────
+// Pre-warm the container when the candidate opens the invite link.
+// Does NOT start the session timer — just provisions the ACI container so it's
+// ready by the time the candidate clicks "Start Assessment".
+// Safe to call multiple times — idempotent (reuses ready container).
+router.post('/:id/provision', async (req: ExpressRequest, res: ExpressResponse) => {
+  try {
+    const { id } = req.params;
+
+    const session = await (prisma.session as any).findUnique({
+      where: { id },
+      select: {
+        id: true,
+        sessionCode: true,
+        status: true,
+        containerUrl: true,
+        containerStatus: true,
+        assignedVariantId: true,
+        toolResources: true,
+        assessment: {
+          select: {
+            jobTitle: true,
+            level: true,
+            techStack: true,
+            jobDescription: true,
+            assessmentType: true,
+            company: { select: { name: true } },
+          },
+        },
+      },
+    });
+
+    if (!session) return res.status(404).json({ success: false, error: 'Session not found' });
+    if (session.status !== 'pending') {
+      // Already active/ended — nothing to provision
+      return res.json({ success: true, containerStatus: session.containerStatus || 'ready' });
+    }
+
+    // Already provisioned — return immediately
+    if (session.containerUrl && session.containerStatus === 'ready') {
+      return res.json({ success: true, containerStatus: 'ready', containerUrl: session.containerUrl });
+    }
+
+    // Already in progress (another tab opened at same time) — let client poll
+    if (session.containerStatus === 'provisioning') {
+      return res.json({ success: true, containerStatus: 'provisioning' });
+    }
+
+    // No template = no container needed (code challenge)
+    if (!session.assignedVariantId) {
+      return res.json({ success: true, containerStatus: 'not_needed' });
+    }
+
+    // Load template files
+    const tpl = await (prisma.template as any).findUnique({
+      where: { id: session.assignedVariantId },
+      select: { templateSpec: true },
+    });
+    const tplSpec = tpl?.templateSpec as any;
+    let templateFiles = tplSpec?.fileStructure as Record<string, string> | undefined;
+
+    if (!templateFiles || Object.keys(templateFiles).length === 0) {
+      return res.json({ success: true, containerStatus: 'not_needed' });
+    }
+
+    // Sync README with intentional issues
+    if (tplSpec?.intentionalIssues?.length > 0) {
+      const issues: Array<{ id: string; description: string; file?: string; severity?: string }> = tplSpec.intentionalIssues;
+      const readmeKey = Object.keys(templateFiles).find(
+        k => k === 'README.md' || k.toLowerCase().endsWith('/readme.md')
+      ) ?? 'README.md';
+      const issueLines = issues.map((issue, i) => {
+        const severity = issue.severity ? ` [${issue.severity.toUpperCase()}]` : '';
+        const file     = issue.file     ? ` in \`${issue.file}\`` : '';
+        return `${i + 1}. **${issue.description}**${severity}${file}`;
+      }).join('\n');
+      templateFiles[readmeKey] =
+`# Assessment Tasks\n\nFix the following bugs that have been intentionally introduced into this codebase.\n\n## Bugs to Fix\n\n${issueLines}\n\n## Instructions\n\n- Identify each bug in the code\n- Fix all ${issues.length} issue${issues.length !== 1 ? 's' : ''} listed above\n- Make sure existing functionality still works after your fixes\n- You may use the AI Assistant panel for hints (your prompts are evaluated)\n`;
+    }
+
+    // Mark as provisioning
+    await (prisma.session as any).update({
+      where: { id },
+      data: { containerStatus: 'provisioning' } as any,
+    });
+
+    // Provision asynchronously — respond immediately so the frontend can poll
+    const sessionCode = session.sessionCode as string;
+    setImmediate(async () => {
+      const MAX_RETRIES = 3;
+      const RETRY_DELAYS_MS = [5_000, 15_000, 30_000];
+      let provisionedUrl: string | null = null;
+      let provisionedId:  string | null = null;
+
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          const result = getUseLocalDocker()
+            ? await provisionLocalContainer(sessionCode, templateFiles!)
+            : await provisionAssessmentContainer(sessionCode, templateFiles!);
+          const r = result as any;
+          provisionedId  = r.containerId;
+          provisionedUrl = r.codeServerUrl;
+          logger.info(`[Provision] ✅ Container ready for ${sessionCode}: ${provisionedUrl}`);
+          break;
+        } catch (err: any) {
+          logger.warn(`[Provision] Attempt ${attempt}/${MAX_RETRIES} failed for ${sessionCode}: ${err.message}`);
+          if (attempt < MAX_RETRIES) await new Promise(r => setTimeout(r, RETRY_DELAYS_MS[attempt - 1]));
+        }
+      }
+
+      if (provisionedUrl) {
+        await (prisma.session as any).update({
+          where: { id },
+          data: { containerId: provisionedId, containerUrl: provisionedUrl, containerStatus: 'ready' } as any,
+        });
+        logger.info(`[Provision] ✅ Session ${id} container saved`);
+
+        // ── Provision docs in parallel (fire-and-forget within this async block) ──
+        // Now that we have template context, build ScenarioContext and activate tools.
+        // createGoogleDoc is idempotent — safe to call here even if /start also calls it.
+        try {
+          const assessment = (session as any).assessment;
+          const provisionCtx = buildScenarioContext({
+            fileStructure:     templateFiles ?? {},
+            intentionalIssues: tplSpec?.intentionalIssues ?? [],
+            jobRole:           assessment?.jobTitle ?? 'Engineer',
+            techStack:         assessment?.techStack ?? [],
+            jobDescription:    assessment?.jobDescription ?? '',
+            companyName:       assessment?.company?.name ?? '',
+            level:             assessment?.level ?? 'Mid',
+            recruiterTasks:    [],
+            derivedTasks:      [],
+            components:        tplSpec?.components ?? assessment?.assessmentType ? [assessment.assessmentType] : [],
+          });
+          const provisionResponse: Record<string, any> = {};
+          await activateTools(id, sessionCode, provisionCtx, provisionResponse, {
+            fireAndForget: false, // we're already in a background task — run synchronously
+          });
+          logger.info(`[Provision] ✅ Docs provisioned for ${sessionCode}`);
+        } catch (docsErr: any) {
+          logger.warn(`[Provision] ⚠️ Docs provisioning failed for ${sessionCode}: ${docsErr.message}`);
+        }
+      } else {
+        await (prisma.session as any).update({
+          where: { id },
+          data: { containerStatus: 'failed' } as any,
+        });
+        logger.error(`[Provision] ❌ All retries failed for ${sessionCode}`);
+      }
+    });
+
+    return res.json({ success: true, containerStatus: 'provisioning' });
+  } catch (err: any) {
+    logger.error('[Provision] Unexpected error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -1630,29 +1692,113 @@ router.post('/:id/start', enforceTimer, async (req: ExpressRequest, res: Express
       // Only provision container for IDE challenges (which have templateFiles)
       // Code challenges don't need containers, so skip provisioning for them
       if (needsContainer && templateFiles) {
-        // ── Container was guaranteed-provisioned at invite time ───────────────
-        // By design, the invite is only sent AFTER the container is confirmed running.
-        // containerStatus === 'ready' is the expected state when a candidate hits /start.
-        const preProvStatus       = (data as any).containerStatus as string | null;
-        const existingContainerUrl = (data as any).containerUrl   as string | null;
+        // ── On-demand container provisioning ────────────────────────────────
+        // Containers are no longer provisioned at invite time (cost savings).
+        // We provision NOW when the candidate clicks "Start Assessment".
+        const existingContainerUrl = (data as any).containerUrl as string | null;
+        const preProvStatus        = (data as any).containerStatus as string | null;
 
-        if (existingContainerUrl) {
-          // ✅ Container was provisioned at invite time — always the expected path
-          logger.log(`🔥 Container ready for session ${id}: ${existingContainerUrl}`);
+        if (existingContainerUrl && preProvStatus === 'ready') {
+          // Already provisioned (e.g. re-start after page refresh) — reuse it
+          logger.log(`🔥 Container already ready for session ${id}: ${existingContainerUrl}`);
           containerInfo = {
             status: 'ready',
             url: existingContainerUrl,
             message: 'Container ready.',
           };
         } else {
-          // Should not happen — the daily health monitor re-provisions any failed containers.
-          // Log it for ops visibility but don't surface it to the candidate.
-          logger.error(`[Session Start] No container URL for session ${id} (status=${preProvStatus}) — health monitor should have caught this`);
+          // ── Provision the container now ─────────────────────────────────
+          const sessionCode = (data as any).sessionCode as string;
+          logger.info(`[OnDemand] Provisioning container for session ${id} (code=${sessionCode})...`);
+
+          // Mark as provisioning so the frontend can show a spinner
+          await (prisma.session as any).update({
+            where: { id },
+            data: { containerStatus: 'provisioning' } as any,
+          });
+
+          // ── Sync README.md with intentional issues before provisioning ──
+          if (data.assignedVariantId) {
+            try {
+              const tpl = await prisma.template.findUnique({
+                where: { id: data.assignedVariantId as string },
+                select: { templateSpec: true },
+              });
+              const tplSpec = tpl?.templateSpec as any;
+              if (tplSpec?.intentionalIssues?.length > 0 && templateFiles) {
+                const issues: Array<{ id: string; description: string; file?: string; severity?: string }> = tplSpec.intentionalIssues;
+                const readmeKey = Object.keys(templateFiles).find(
+                  k => k === 'README.md' || k.toLowerCase().endsWith('/readme.md')
+                ) ?? 'README.md';
+                const issueLines = issues.map((issue, i) => {
+                  const severity = issue.severity ? ` [${issue.severity.toUpperCase()}]` : '';
+                  const file     = issue.file     ? ` in \`${issue.file}\`` : '';
+                  return `${i + 1}. **${issue.description}**${severity}${file}`;
+                }).join('\n');
+                templateFiles[readmeKey] =
+`# Assessment Tasks\n\nFix the following bugs that have been intentionally introduced into this codebase.\n\n## Bugs to Fix\n\n${issueLines}\n\n## Instructions\n\n- Identify each bug in the code\n- Fix all ${issues.length} issue${issues.length !== 1 ? 's' : ''} listed above\n- Make sure existing functionality still works after your fixes\n- You may use the AI Assistant panel for hints (your prompts are evaluated)\n`;
+              }
+            } catch (e: any) {
+              logger.warn(`[OnDemand] Could not sync README: ${e.message}`);
+            }
+          }
+
+          const MAX_RETRIES = 3;
+          const RETRY_DELAYS_MS = [5_000, 15_000, 30_000];
+          let provisionError: string | null = null;
+          let provisionedUrl: string | null = null;
+          let provisionedId:  string | null = null;
+
+          for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+              const result = getUseLocalDocker()
+                ? await provisionLocalContainer(sessionCode, templateFiles)
+                : await provisionAssessmentContainer(sessionCode, templateFiles);
+              const provResult = result as any;
+              provisionedId  = provResult.containerId;
+              provisionedUrl = provResult.codeServerUrl;
+              provisionError = null;
+              logger.info(`[OnDemand] ✅ Container ready (attempt ${attempt}) for ${sessionCode}: ${provisionedUrl}`);
+              break;
+            } catch (err: any) {
+              provisionError = err.message;
+              logger.warn(`[OnDemand] Attempt ${attempt}/${MAX_RETRIES} failed: ${err.message}`);
+              if (attempt < MAX_RETRIES) {
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAYS_MS[attempt - 1]));
+              }
+            }
+          }
+
+          if (provisionError || !provisionedUrl) {
+            // Provisioning failed — mark the session so recruiter can see
+            await (prisma.session as any).update({
+              where: { id },
+              data: { containerStatus: 'failed' } as any,
+            });
+            logger.error(`[OnDemand] ❌ All ${MAX_RETRIES} attempts failed for ${sessionCode}: ${provisionError}`);
+            return res.status(503).json({
+              success: false,
+              error: 'Failed to start your coding environment. Please refresh the page and try again.',
+              detail: provisionError,
+            });
+          }
+
+          // Save the URL into the session row
+          await (prisma.session as any).update({
+            where: { id },
+            data: {
+              containerId:     provisionedId,
+              containerUrl:    provisionedUrl,
+              containerStatus: 'ready',
+            } as any,
+          });
+
           containerInfo = {
             status: 'ready',
-            url: null,
-            message: 'Container info unavailable.',
+            url: provisionedUrl,
+            message: 'Container ready.',
           };
+          logger.info(`[OnDemand] ✅ Session ${id} container saved: ${provisionedUrl}`);
         }
       } else {
         logger.log(`⏩ Skipping container provisioning for code challenge (no template files needed)`);
@@ -3167,6 +3313,9 @@ router.put('/:id/files/*', optionalAuthenticate, async (req: ExpressRequest, res
     }
 
     await writeContainerFile(session.containerId, filePath, content);
+    // Fire-and-forget: tell code-server to reload the file so the candidate
+    // sees the change immediately even if the file was open with unsaved edits.
+    refreshFileInCodeServer(session.containerId, filePath);
     return res.json({ success: true, path: filePath });
   } catch (error: any) {
     logger.error('[Session Files] write error:', error);

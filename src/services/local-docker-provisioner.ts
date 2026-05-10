@@ -504,6 +504,28 @@ export async function writeContainerFile(containerId: string, filePath: string, 
 }
 
 /**
+ * Tell code-server to reload a file in the open editor.
+ * Fire-and-forget: called after writeContainerFile so VS Code picks up the change
+ * even if the file was open in a dirty (unsaved-edits) state.
+ *
+ * Strategy: run `code-server --reuse-window <abs-path>` inside the container.
+ * When code-server is already running it forwards the open-file request via its
+ * IPC socket, which causes the editor to reload from disk (or show the
+ * "Revert / Overwrite?" prompt if there were local edits).
+ * Errors are silently swallowed — the write already succeeded.
+ */
+export function refreshFileInCodeServer(containerId: string, filePath: string): void {
+  const safePath = filePath.replace(/\.\./g, '').replace(/^\//, '');
+  const absPath = `${CONTAINER_WORKSPACE}/${safePath}`;
+  // Try code-server CLI first; fall back to `code` (symlinked in some images)
+  const cmd = [
+    'sh', '-c',
+    `code-server --reuse-window "${absPath}" 2>/dev/null || code --reuse-window "${absPath}" 2>/dev/null || true`,
+  ];
+  execInContainer(containerId, cmd).catch(() => { /* intentionally silent */ });
+}
+
+/**
  * List files in the workspace directory of a running container.
  * Excludes node_modules, .git, and other noisy directories.
  */

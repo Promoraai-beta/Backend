@@ -1,20 +1,24 @@
 /**
  * Container Health Monitor
  *
- * An autonomous agent that runs on a schedule and repairs any sessions whose
- * container failed to provision at invite time (containerStatus = 'failed').
+ * An autonomous agent that runs on a schedule and repairs sessions whose
+ * on-demand provisioning failed or got stuck.
+ *
+ * Context: Containers are now provisioned on-demand when the candidate clicks
+ * "Start Assessment" (NOT at invite time). The health monitor is only responsible
+ * for cleaning up after failed/stuck on-demand provisioning attempts — it must
+ * NEVER pre-provision containers for sessions that are simply waiting for the
+ * candidate to arrive (containerStatus = 'pending').
  *
  * Schedule: every hour by default (configurable via CONTAINER_HEALTH_INTERVAL_MS)
  *
  * What it does each cycle:
- *  1. Query all pending sessions where containerStatus = 'failed' AND the session
- *     has not yet started AND it hasn't expired.
- *  2. Load each session's template fileStructure.
- *  3. Fire ALL repair jobs in parallel (Promise.allSettled) — same pattern as
- *     Server B's orchestrator which runs variant agents concurrently with asyncio.gather.
- *     5 failed sessions = ~30–60s total instead of ~5 minutes sequential.
- *  4. Each repair job retries up to MAX_RETRIES times with backoff before giving up.
- *  5. Log a human-readable report of what was fixed vs what still needs attention.
+ *  1. Find sessions with containerStatus = 'failed' (provisioning explicitly failed).
+ *  2. Find sessions stuck in containerStatus = 'provisioning' for > 10 minutes
+ *     (candidate clicked Start but the backend crashed mid-way).
+ *  3. Load each session's template fileStructure and retry provisioning.
+ *  4. Fire ALL repair jobs in parallel (Promise.allSettled).
+ *  5. Log a human-readable report of fixed vs still-failed.
  */
 
 import { prisma } from '../lib/prisma';
@@ -114,7 +118,20 @@ async function repairSession(session: {
 
 async function runHealthScan(): Promise<void> {
   const scanStart = Date.now();
-  logger.info('[HealthMonitor] 🔍 Scanning for failed/missing containers...');
+  logger.info('[HealthMonitor] 🔍 Scanning for failed or stuck provisioning sessions...');
+
+  // ── On-demand provisioning model ─────────────────────────────────────────
+  // Containers are now provisioned when the candidate clicks "Start Assessment",
+  // NOT at invite time. This means pending sessions intentionally have no
+  // containerUrl and containerStatus = 'pending'.
+  //
+  // The health monitor must ONLY repair sessions whose provisioning actually
+  // started (status = 'failed' or stuck 'provisioning') — NOT sessions that
+  // are simply waiting for the candidate to arrive.
+  //
+  // 'provisioning' stuck > 10 min = candidate clicked Start but backend crashed
+  // mid-way. We treat those as 'failed' so the candidate can retry.
+  const stuckProvisioningCutoff = new Date(Date.now() - 10 * 60 * 1000);
 
   const unhealthySessions = await (prisma.session as any).findMany({
     where: {
@@ -123,8 +140,15 @@ async function runHealthScan(): Promise<void> {
       AND: [
         {
           OR: [
+            // Provisioning explicitly failed
             { containerStatus: 'failed' },
-            { containerUrl: null, containerStatus: { not: 'ready' } },
+            // Stuck in 'provisioning' for more than 10 minutes (backend crash mid-provision).
+            // Use createdAt as proxy — if the session is older than 10 min and still
+            // shows 'provisioning', the backend crashed before it could finish.
+            {
+              containerStatus: 'provisioning',
+              createdAt: { lt: stuckProvisioningCutoff },
+            },
           ],
         },
         {

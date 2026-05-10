@@ -77,6 +77,22 @@ async function createGoogleDoc(
   description: string,
 ): Promise<string | null> {
   try {
+    // ── Idempotency guard ─────────────────────────────────────────────────────
+    // Check the DB first — if a doc URL is already persisted, return it immediately
+    // without creating another doc. This prevents duplicates when the function is
+    // called concurrently (e.g. multiple polls or parallel provision calls).
+    const { prisma: prismaCheck } = await import('../lib/prisma');
+    const existingSession = await prismaCheck.session.findUnique({
+      where: { id: sessionId },
+      select: { toolResources: true },
+    });
+    const existingDocUrl = (existingSession?.toolResources as any)?.docs?.url as string | undefined;
+    if (existingDocUrl) {
+      logger.info(`[DocsTool] Doc already exists for session ${sessionId} — reusing ${existingDocUrl}`);
+      return existingDocUrl;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     const { getOAuthAccessToken } = await import('../services/google-auth');
     const accessToken = await getOAuthAccessToken();
     const parentFolderId = process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID;
